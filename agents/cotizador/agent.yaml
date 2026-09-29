@@ -1,0 +1,15 @@
+name: cotizador
+description: >
+  Cotiza y confirma envios segun tarifario vigente por zona y fecha.
+  Usar cuando el usuario pida precio o reserva de un envio.
+model: "anthropic:claude-sonnet-5"
+prompt: prompt.md
+tools:
+  - tools:cotizar_envio
+  - tools:confirmar_cotizacion
+skills: skills
+# confirmar_cotizacion tiene efecto (crea una orden): queda pendiente de
+# aprobacion humana (regla 6). cotizar_envio es solo lectura, no la necesita.
+require_approval:
+  - confirmar_cotizacion
+evals: evals

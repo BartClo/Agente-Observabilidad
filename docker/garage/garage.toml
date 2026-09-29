@@ -1,0 +1,23 @@
+# Config de un solo nodo, para dev local. `rpc_secret`/`admin_token`/
+# `metrics_token` son PLACEHOLDER fijos a proposito (no protegen nada real: no
+# hay cluster que defender en un solo nodo local). Generar valores propios con
+# `openssl rand -hex 32` / `openssl rand -base64 32` antes de usar esto contra
+# una red que no sea localhost.
+metadata_dir = "/data/meta"
+data_dir = "/data/data"
+db_engine = "sqlite"
+replication_factor = 1
+
+rpc_bind_addr = "[::]:3901"
+rpc_public_addr = "127.0.0.1:3901"
+rpc_secret = "54bca045ebead635f22459ca66183e0e3edae079f0a276f5723c2ab7880dd76b"
+
+[s3_api]
+s3_region = "garage"
+api_bind_addr = "[::]:3900"
+root_domain = ".s3.garage.localhost"
+
+[admin]
+api_bind_addr = "[::]:3903"
+admin_token = "gxOKdG+E2hqMllgTqAT7lKATm6wJD3EHSe5GIxSSgEk="
+metrics_token = "emvQndV/kvvpytDYQWzr18iwSRFy8xZKPZS5uw0Ud5s="

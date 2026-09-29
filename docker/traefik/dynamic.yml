@@ -1,0 +1,14 @@
+# Ruta hacia `app`. No funciona todavia: app/main.py no expone HTTP, eso llega
+# en la etapa 4 (endpoint FastAPI). Placeholder listo para ese momento: ajustar
+# el puerto si el endpoint termina usando otro.
+http:
+  routers:
+    app:
+      rule: "PathPrefix(`/`)"
+      service: app
+
+  services:
+    app:
+      loadBalancer:
+        servers:
+          - url: "http://app:8000"

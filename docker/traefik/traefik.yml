@@ -1,0 +1,18 @@
+# Config estatica de Traefik. Usa el provider "file" (dynamic.yml), no el
+# provider "docker": ese ultimo necesita montar docker.sock, y este repo evita
+# montarlo en cualquier servicio (ver docker-compose.yml, servicio app).
+entryPoints:
+  web:
+    address: ":80"
+
+providers:
+  file:
+    filename: /etc/traefik/dynamic.yml
+    watch: true
+
+api:
+  dashboard: true
+  insecure: true # solo dev; el servicio entero es opt-in via profile "traefik"
+
+log:
+  level: INFO
