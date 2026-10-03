@@ -19,7 +19,8 @@ el código del framework.
 
 ```
 app/        Punto de entrada (main.py) y loader que descubre agentes
-agents/     Un agente por carpeta (_template/ para copiar, cotizador/ de ejemplo)
+agents/     Un agente por carpeta (_template/ para copiar, cotizador/ de ejemplo,
+            aiops/ agente de incidentes L1)
 domain/     Lógica de negocio pura, sin imports de LangChain/deepagents
 rag/        Retrieval genérico: chunking, embeddings OpenAI, pgvector
 infra/      Clientes de Redis, Qdrant, MCP, cola RQ y object store S3
@@ -59,6 +60,7 @@ cp -r agents/_template agents/mi-agente
 | [`docs/getting-started.md`](docs/getting-started.md) | Instalación, variables de entorno, comandos |
 | [`docs/architecture.md`](docs/architecture.md) | Componentes, flujo de un pedido, reglas del framework |
 | [`docs/creating-an-agent.md`](docs/creating-an-agent.md) | Cómo crear y probar un agente |
+| [`docs/aiops-agent.md`](docs/aiops-agent.md) | Agente AIOps para incidentes L1 (tesis) |
 | [`docs/open-questions.md`](docs/open-questions.md) | Cosas sin verificar contra fuente oficial |
 | [`rag/README.md`](rag/README.md), [`infra/README.md`](infra/README.md), [`domain/README.md`](domain/README.md) | Detalle por componente |
 

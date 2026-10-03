@@ -1,0 +1,403 @@
+"""Tests del dominio AIOps sobre el entorno simulado (sin LLM ni infraestructura)."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+
+from domain.aiops_core import metricas
+from domain.aiops_core.acciones import (
+    AccionNoPermitida,
+    BackendDeshabilitado,
+    ejecutar_accion,
+    validar_servicio,
+)
+from domain.aiops_core.auditoria import Auditoria
+from domain.aiops_core.catalogo import CATALOGO, Senal, categoria_para_alerta
+from domain.aiops_core.ciclo import Ciclo, ErrorCiclo
+from domain.aiops_core.modelos import (
+    AccionEjecutada,
+    Alerta,
+    Estado,
+    NivelAutonomia,
+    Severidad,
+)
+from domain.aiops_core.politicas import Politica, Veredicto, politica_desde_entorno
+from domain.aiops_core.simulador import EntornoSimulado
+
+
+class Reloj:
+    def __init__(self) -> None:
+        self.t = 0.0
+
+    def __call__(self) -> float:
+        self.t += 10
+        return self.t
+
+
+def armar(
+    categoria: str = "servicio_detenido",
+    nivel: NivelAutonomia = NivelAutonomia.AUTONOMO_CON_ROLLBACK,
+    severidad: Severidad = Severidad.MEDIA,
+    **kw: object,
+) -> tuple[Ciclo, EntornoSimulado, str]:
+    env = EntornoSimulado()
+    alerta = env.inyectar_fallo("checkout", categoria, severidad)
+    ciclo = Ciclo(env, env, Politica(nivel=nivel, **kw), Auditoria(), Reloj())  # type: ignore[arg-type]
+    return ciclo, env, alerta.id
+
+
+def preparar(ciclo: Ciclo, alerta_id: str, confianza: float = 0.95) -> str:
+    inc = ciclo.abrir(alerta_id)
+    ciclo.confirmar_anomalia(inc.id)
+    categoria, _, _ = ciclo.clasificar(inc.id)
+    assert categoria is not None
+    ciclo.registrar_diagnostico(inc.id, "causa", confianza, categoria.runbook_id)
+    return inc.id
+
+
+# --- catalogo / acciones ------------------------------------------------------------
+
+
+def test_senal_y_catalogo() -> None:
+    assert Senal("up", ">=", 1).cumple(1) and not Senal("up", ">=", 1).cumple(0)
+    assert Senal("x", "<=", 85).describir() == "x <= 85"
+    assert categoria_para_alerta("ServiceDown") is CATALOGO["servicio_detenido"]
+    assert categoria_para_alerta("PodFailed") is CATALOGO["pod_fallido"]
+    assert categoria_para_alerta("Desconocida") is None
+    assert not CATALOGO["certificado_por_vencer"].remediable
+
+
+def test_ejecutar_accion_valida_lista_y_servicio() -> None:
+    env = EntornoSimulado()
+    assert "restart_service" in ejecutar_accion(env, "restart_service", "checkout")
+    with pytest.raises(AccionNoPermitida):
+        ejecutar_accion(env, "rm_rf", "checkout")
+    with pytest.raises(AccionNoPermitida):
+        validar_servicio("checkout; rm -rf /")
+    with pytest.raises(RuntimeError):
+        BackendDeshabilitado().ejecutar("restart_service", "x", 1)
+
+
+# --- ciclo feliz por categoria --------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "categoria", ["servicio_detenido", "disco_lleno", "pod_fallido", "cola_detenida"]
+)
+def test_ciclo_completo_resuelve_de_forma_autonoma(categoria: str) -> None:
+    ciclo, env, alerta_id = armar(categoria)
+    inc_id = preparar(ciclo, alerta_id)
+    res = ciclo.ejecutar_remediacion(inc_id, aprobada=False)
+    assert res.veredicto is Veredicto.PERMITIR and res.ejecutada
+    ok, _ = ciclo.verificar(inc_id)
+    assert ok
+    inc = ciclo.cerrar(inc_id)
+    assert inc.estado is Estado.RESUELTO and inc.resuelto_autonomo
+    assert env.alertas_activas() == []
+    assert {e.tipo for e in ciclo.auditoria.de_incidente(inc_id)} >= {
+        "abierto",
+        "confirmacion",
+        "clasificacion",
+        "diagnostico",
+        "decision_politica",
+        "accion",
+        "verificacion",
+        "cerrado",
+    }
+
+
+# --- invariantes de seguridad ---------------------------------------------------------
+
+
+def test_no_se_cierra_sin_verificacion() -> None:
+    ciclo, _, alerta_id = armar()
+    inc_id = preparar(ciclo, alerta_id)
+    ciclo.ejecutar_remediacion(inc_id, aprobada=False)
+    with pytest.raises(ErrorCiclo, match="verificada"):
+        ciclo.cerrar(inc_id)
+
+
+def test_accion_ineficaz_no_verifica_y_permite_escalar() -> None:
+    ciclo, env, alerta_id = armar()
+    env.acciones_efectivas = False
+    inc_id = preparar(ciclo, alerta_id)
+    ciclo.ejecutar_remediacion(inc_id, aprobada=False)
+    ok, detalle = ciclo.verificar(inc_id)
+    assert not ok and "NO recuperado" in detalle
+    paquete = ciclo.escalar(inc_id, "la accion no recupero el servicio")
+    assert "ESCALADO" in paquete and "restart_service" in paquete
+    inc = ciclo.incidente(inc_id)
+    assert inc.estado is Estado.ESCALADO and not inc.resuelto_autonomo
+
+
+def test_rollback_solo_en_nivel_4() -> None:
+    ciclo, env, alerta_id = armar("disco_lleno")
+    inc_id = preparar(ciclo, alerta_id)
+    ciclo.ejecutar_remediacion(inc_id, aprobada=False)
+    res = ciclo.revertir(inc_id)
+    assert res.ejecutada and env.acciones_ejecutadas[-1][0] == "restore_compressed_logs"
+    assert ciclo.incidente(inc_id).intentos == 1  # el rollback no cuenta como reintento
+
+    ciclo3, _, a3 = armar("disco_lleno", nivel=NivelAutonomia.AUTONOMO_BAJO_RIESGO)
+    i3 = preparar(ciclo3, a3)
+    ciclo3.ejecutar_remediacion(i3, aprobada=False)
+    assert ciclo3.revertir(i3).veredicto is Veredicto.DENEGAR
+
+
+def test_rollback_sin_accion_previa_o_sin_rollback() -> None:
+    ciclo, _, alerta_id = armar("disco_lleno")
+    inc_id = preparar(ciclo, alerta_id)
+    with pytest.raises(ErrorCiclo, match="previa"):
+        ciclo.revertir(inc_id)
+    ciclo2, _, a2 = armar("servicio_detenido")
+    i2 = preparar(ciclo2, a2)
+    assert ciclo2.revertir(i2).veredicto is Veredicto.DENEGAR
+
+
+@pytest.mark.parametrize("nivel", [NivelAutonomia.OBSERVA, NivelAutonomia.RECOMIENDA])
+def test_niveles_bajos_no_ejecutan_ni_con_aprobacion(nivel: NivelAutonomia) -> None:
+    ciclo, env, alerta_id = armar(nivel=nivel)
+    inc_id = preparar(ciclo, alerta_id)
+    for aprobada in (False, True):
+        res = ciclo.ejecutar_remediacion(inc_id, aprobada=aprobada)
+        assert res.veredicto is Veredicto.DENEGAR and not res.ejecutada
+    assert env.acciones_ejecutadas == []
+
+
+def test_nivel_2_pide_aprobacion_y_no_cuenta_como_autonomo() -> None:
+    ciclo, env, alerta_id = armar(nivel=NivelAutonomia.CON_APROBACION)
+    inc_id = preparar(ciclo, alerta_id)
+    res = ciclo.ejecutar_remediacion(inc_id, aprobada=False)
+    assert res.veredicto is Veredicto.APROBACION and env.acciones_ejecutadas == []
+    assert ciclo.ejecutar_remediacion(inc_id, aprobada=True).ejecutada
+    ciclo.verificar(inc_id)
+    inc = ciclo.cerrar(inc_id)
+    assert inc.verificado and not inc.resuelto_autonomo  # hubo intervencion humana
+
+
+def test_kill_switch_bloquea_ejecucion_pero_no_escalamiento() -> None:
+    ciclo, env, alerta_id = armar(kill_switch=lambda: True)
+    inc_id = preparar(ciclo, alerta_id)
+    res = ciclo.ejecutar_remediacion(inc_id, aprobada=True)
+    assert res.veredicto is Veredicto.DENEGAR and "kill switch" in res.mensaje
+    assert env.acciones_ejecutadas == []
+    assert "ESCALADO" in ciclo.escalar(inc_id, "kill switch")
+
+
+def test_confianza_baja_entorno_y_servicio_no_autorizados() -> None:
+    ciclo, _, a = armar()
+    inc_id = preparar(ciclo, a, confianza=0.5)
+    assert "confianza" in ciclo.ejecutar_remediacion(inc_id, aprobada=False).mensaje
+
+    ciclo, _, a = armar(entornos_permitidos=frozenset({"prod"}))
+    assert "entorno" in ciclo.ejecutar_remediacion(preparar(ciclo, a), aprobada=False).mensaje
+
+    ciclo, _, a = armar(servicios_permitidos=frozenset({"otro"}))
+    assert "servicio" in ciclo.ejecutar_remediacion(preparar(ciclo, a), aprobada=False).mensaje
+
+
+def test_limite_de_reintentos() -> None:
+    ciclo, env, alerta_id = armar(max_reintentos=2)
+    env.acciones_efectivas = False
+    inc_id = preparar(ciclo, alerta_id)
+    assert ciclo.ejecutar_remediacion(inc_id, aprobada=False).ejecutada
+    assert ciclo.ejecutar_remediacion(inc_id, aprobada=False).ejecutada
+    res = ciclo.ejecutar_remediacion(inc_id, aprobada=False)
+    assert res.veredicto is Veredicto.DENEGAR and "reintentos" in res.mensaje
+    assert len(env.acciones_ejecutadas) == 2
+
+
+def test_severidad_critica_y_categoria_solo_deteccion_no_son_elegibles() -> None:
+    ciclo, env, a = armar(severidad=Severidad.CRITICA)
+    inc_id = ciclo.abrir(a).id
+    ciclo.confirmar_anomalia(inc_id)
+    _, elegible, motivos = ciclo.clasificar(inc_id)
+    assert not elegible and "severidad critica" in motivos
+    assert env.acciones_ejecutadas == []
+
+    ciclo, _, a = armar("certificado_por_vencer")
+    inc_id = ciclo.abrir(a).id
+    ciclo.confirmar_anomalia(inc_id)
+    _, elegible, motivos = ciclo.clasificar(inc_id)
+    ciclo.registrar_diagnostico(inc_id, "cert", 0.99, "RB-005")
+    res = ciclo.ejecutar_remediacion(inc_id, aprobada=False)
+    assert not elegible and res.veredicto is Veredicto.DENEGAR and not res.ejecutada
+
+
+def test_runbook_incompatible_y_orden_del_ciclo() -> None:
+    ciclo, _, a = armar()
+    inc_id = ciclo.abrir(a).id
+    with pytest.raises(ErrorCiclo, match="confirmar"):
+        ciclo.clasificar(inc_id)
+    ciclo.confirmar_anomalia(inc_id)
+    with pytest.raises(ErrorCiclo, match="clasificar"):
+        ciclo.registrar_diagnostico(inc_id, "x", 0.9, "RB-001")
+    ciclo.clasificar(inc_id)
+    with pytest.raises(ErrorCiclo, match="incompatible"):
+        ciclo.registrar_diagnostico(inc_id, "x", 0.9, "RB-002")
+    with pytest.raises(ErrorCiclo, match="entre 0 y 1"):
+        ciclo.registrar_diagnostico(inc_id, "x", 1.5, "RB-001")
+    with pytest.raises(ErrorCiclo, match="nada que verificar"):
+        ciclo.verificar(inc_id)
+
+
+def test_politica_exige_diagnostico_previo() -> None:
+    ciclo, _, a = armar()
+    inc_id = ciclo.abrir(a).id
+    ciclo.confirmar_anomalia(inc_id)
+    ciclo.clasificar(inc_id)
+    assert "diagnostico" in ciclo.ejecutar_remediacion(inc_id, aprobada=False).mensaje
+
+
+def test_alertas_e_incidentes_inexistentes() -> None:
+    ciclo, _, _ = armar()
+    with pytest.raises(ErrorCiclo, match="no esta activa"):
+        ciclo.abrir("NOPE")
+    with pytest.raises(ErrorCiclo, match="no existe"):
+        ciclo.incidente("INC-X")
+
+
+def test_descartar_falso_positivo() -> None:
+    ciclo, env, a = armar()
+    inc_id = ciclo.abrir(a).id
+    env.ejecutar("restart_service", "checkout", 1)  # se recupero antes de confirmar
+    confirmada, detalle = ciclo.confirmar_anomalia(inc_id)
+    assert not confirmada and "normal" in detalle
+    assert ciclo.descartar(inc_id).estado is Estado.DESCARTADO
+    ciclo2, _, a2 = armar()
+    i2 = preparar(ciclo2, a2)
+    with pytest.raises(ErrorCiclo, match="confirmada"):
+        ciclo2.descartar(i2)
+
+
+def test_sin_evidencia_o_fuera_de_catalogo_no_confirma() -> None:
+    class SinDatos(EntornoSimulado):
+        def metrica(self, servicio: str, nombre: str) -> float | None:
+            return None
+
+    env = SinDatos()
+    a = env.inyectar_fallo("checkout", "servicio_detenido")
+    ciclo = Ciclo(env, env, Politica(), Auditoria())
+    inc_id = ciclo.abrir(a.id).id
+    confirmada, detalle = ciclo.confirmar_anomalia(inc_id)
+    assert not confirmada and "insuficiente" in detalle
+    assert ciclo.alertas_activas()  # sin dato la alerta sigue activa
+    assert ciclo.logs(inc_id, 5)
+    # fuerza el estado para verificar sin dato
+    ciclo.incidente(inc_id).acciones.append(AccionEjecutada("a", "s", "r", True))
+    ciclo.incidente(inc_id).anomalia_confirmada = True
+    ciclo.clasificar(inc_id)
+    ok, detalle = ciclo.verificar(inc_id)
+    assert not ok and "no comprobable" in detalle
+
+    env2 = EntornoSimulado()
+    env2._alertas.append(Alerta("A9", "Rara", "svc", "staging", Severidad.BAJA, "?"))
+    ciclo2 = Ciclo(env2, env2, Politica(), Auditoria())
+    i2 = ciclo2.abrir("A9").id
+    confirmada, detalle = ciclo2.confirmar_anomalia(i2)
+    assert not confirmada and "fuera del catalogo" in detalle
+
+
+def test_backend_que_falla_registra_accion_fallida() -> None:
+    env = EntornoSimulado()
+    a = env.inyectar_fallo("checkout", "servicio_detenido")
+    ciclo = Ciclo(
+        env,
+        BackendDeshabilitado(),
+        Politica(nivel=NivelAutonomia.AUTONOMO_BAJO_RIESGO),
+        Auditoria(),
+    )
+    inc_id = preparar(ciclo, a.id)
+    res = ciclo.ejecutar_remediacion(inc_id, aprobada=False)
+    assert not res.ejecutada and "FALLO" in res.mensaje
+    assert ciclo.incidente(inc_id).acciones[0].ok is False
+    assert not ciclo.verificar(inc_id)[0]
+
+
+def test_estado_terminal_no_admite_acciones() -> None:
+    ciclo, _, a = armar()
+    inc_id = preparar(ciclo, a)
+    ciclo.escalar(inc_id, "x")
+    with pytest.raises(ErrorCiclo, match="no admite"):
+        ciclo.ejecutar_remediacion(inc_id, aprobada=False)
+
+
+# --- politica desde entorno / auditoria / metricas ------------------------------------
+
+
+def test_politica_desde_entorno(tmp_path: Path) -> None:
+    default = politica_desde_entorno({})
+    assert default.nivel is NivelAutonomia.RECOMIENDA and not default.kill_switch()
+    kill = tmp_path / "kill"
+    p = politica_desde_entorno(
+        {
+            "AIOPS_AUTONOMY_LEVEL": "3",
+            "AIOPS_ALLOWED_ENVS": "dev, prod",
+            "AIOPS_ALLOWED_SERVICES": "a,b",
+            "AIOPS_CONFIDENCE_THRESHOLD": "0.9",
+            "AIOPS_MAX_RETRIES": "1",
+            "AIOPS_KILL_SWITCH_FILE": str(kill),
+        }
+    )
+    assert p.nivel is NivelAutonomia.AUTONOMO_BAJO_RIESGO
+    assert p.entornos_permitidos == frozenset({"dev", "prod"})
+    assert p.servicios_permitidos == frozenset({"a", "b"})
+    assert (p.umbral_confianza, p.max_reintentos) == (0.9, 1)
+    assert not p.kill_switch()
+    kill.write_text("1")
+    assert p.kill_switch()
+    assert politica_desde_entorno({"AIOPS_KILL_SWITCH": "1"}).kill_switch()
+
+
+def test_accion_fuera_de_lista_denegada_por_politica() -> None:
+    ciclo, _, a = armar()
+    inc = ciclo.incidente(preparar(ciclo, a))
+    d = ciclo.politica.evaluar(inc, CATALOGO["servicio_detenido"], "rm_rf")
+    assert d.veredicto is Veredicto.DENEGAR
+    d = ciclo.politica.evaluar(inc, CATALOGO["servicio_detenido"], "recreate_pod")
+    assert "no es la accion autorizada" in d.razones[0]
+
+
+def test_auditoria_en_archivo(tmp_path: Path) -> None:
+    ruta = tmp_path / "sub" / "audit.jsonl"
+    aud = Auditoria(ruta)
+    aud.registrar("INC-1", "abierto", alerta="x")
+    aud.registrar("INC-2", "abierto")
+    assert len(ruta.read_text().splitlines()) == 2
+    assert len(aud.de_incidente("INC-1")) == 1
+
+
+def test_metricas_tra_mttr_rollback() -> None:
+    reloj = Reloj()
+    env = EntornoSimulado()
+    ciclo = Ciclo(
+        env, env, Politica(nivel=NivelAutonomia.AUTONOMO_CON_ROLLBACK), Auditoria(), reloj
+    )
+    ids = []
+    for svc, cat in (("a", "servicio_detenido"), ("b", "disco_lleno"), ("c", "pod_fallido")):
+        ids.append(preparar(ciclo, env.inyectar_fallo(svc, cat).id))
+    ciclo.ejecutar_remediacion(ids[0], aprobada=False)
+    ciclo.verificar(ids[0])
+    ciclo.cerrar(ids[0])
+    ciclo.ejecutar_remediacion(ids[1], aprobada=False)
+    ciclo.revertir(ids[1])
+    ciclo.escalar(ids[1], "rollback")
+    ciclo.escalar(ids[2], "sin accion")
+    incs = ciclo.incidentes()
+    assert metricas.tasa_resolucion_autonoma(incs) == pytest.approx(100 / 3)
+    assert metricas.mttr(incs) > 0
+    assert metricas.reduccion_mttr(100, 70) == pytest.approx(30)
+    assert metricas.tasa_rollback(incs) == pytest.approx(50)
+
+
+def test_metricas_casos_borde() -> None:
+    with pytest.raises(ValueError):
+        metricas.tasa_resolucion_autonoma([])
+    with pytest.raises(ValueError):
+        metricas.mttr([])
+    with pytest.raises(ValueError):
+        metricas.reduccion_mttr(0, 1)
+    with pytest.raises(ValueError):
+        metricas.tasa_rollback([])

@@ -48,6 +48,25 @@ de escribirlas. Revisar antes de depender de ellas en produccion.
   alinear protocolo con `qdrant-client>=1.19,<2.0` en `pyproject.toml`. Si se
   actualiza uno, actualizar el otro en el mismo cambio.
 
+## Agente aiops
+
+- **Esquema de tools desde funciones envueltas**: `agents/aiops/tools.py` envuelve
+  cada tool con `functools.wraps` (devuelve los errores como texto). Se asume que
+  LangChain arma el esquema siguiendo `__wrapped__` (firma y docstring originales).
+  No se probo con `deepagents` instalado: correr `tests/test_loader_aiops.py` y
+  una `make aiops-demo` antes de confiar en ello.
+
+- **Consultas PromQL/LogQL de `infra/observabilidad.py`**: supuestos sobre
+  node_exporter, kube-state-metrics, rabbitmq y blackbox_exporter, y la etiqueta
+  `service`. Ajustarlos a las metricas reales del entorno de la tesis.
+
+- **Tool con aprobacion (nivel 2) de punta a punta**: `interrupt_on` pausa el grafo,
+  pero reanudarlo necesita checkpointer y un canal humano (endpoint/UI). `make
+  aiops-demo` usa el nivel 3 para no depender de eso.
+
+- **Catalogo L1 y runbooks**: los valores son candidatos de diseño de la tesis
+  (`PLACEHOLDER` en vigencia/propietario). Validar con operaciones.
+
 ## Infra (Garage / worker / Traefik)
 
 - **MinIO oficial descartado, se uso Garage en su lugar**: la imagen

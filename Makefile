@@ -2,7 +2,7 @@ COMPOSE = docker compose
 RUN = $(COMPOSE) run --rm app
 
 .PHONY: build lock check lint format typecheck test coverage evals run shell down logs \
-	rag-init-db rag-ingest rag-query
+	rag-init-db rag-ingest rag-query aiops-ingest aiops-demo
 
 build:
 	$(COMPOSE) build
@@ -51,3 +51,11 @@ rag-ingest:
 
 rag-query:
 	$(RUN) uv run python -m rag.cli query $(COLLECTION) "$(Q)"
+
+# Agente aiops: ver docs/aiops-agent.md
+aiops-ingest:
+	$(RUN) uv run python -m rag.cli ingest aiops_runbooks agents/aiops/runbooks
+
+AIOPS_DEMO_LEVEL ?= 3
+aiops-demo:
+	$(COMPOSE) run --rm -e AIOPS_AUTONOMY_LEVEL=$(AIOPS_DEMO_LEVEL) app uv run python -m agents.aiops.demo

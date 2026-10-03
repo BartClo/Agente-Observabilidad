@@ -1,0 +1,32 @@
+name: aiops
+description: >
+  Agente autonomo de AIOps para incidentes operacionales recurrentes de nivel 1
+  (servicio caido, disco lleno, pod fallido, cola detenida, certificado por vencer).
+  Usar ante alertas de monitoreo o pedidos sobre incidentes, su estado o su resolucion.
+model: "anthropic:claude-sonnet-5"
+prompt: prompt.md
+tools:
+  - tools:listar_alertas_activas
+  - tools:abrir_incidente
+  - tools:confirmar_anomalia
+  - tools:consultar_logs
+  - tools:clasificar_incidente
+  - tools:registrar_diagnostico
+  - tools:ejecutar_remediacion
+  - tools:ejecutar_remediacion_con_aprobacion
+  - tools:verificar_recuperacion
+  - tools:revertir_accion
+  - tools:escalar_a_humano
+  - tools:cerrar_incidente
+  - tools:descartar_falso_positivo
+  - tools:estado_incidente
+skills: skills
+# Runbooks indexados con: make rag-ingest COLLECTION=aiops_runbooks SRC=agents/aiops/runbooks
+rag:
+  collection: aiops_runbooks
+  k: 3
+# Autonomia nivel 2: la ejecucion con aprobacion queda pausada hasta que un humano
+# la apruebe. ejecutar_remediacion (sin aprobacion) la controla la politica de domain/.
+require_approval:
+  - ejecutar_remediacion_con_aprobacion
+evals: evals
