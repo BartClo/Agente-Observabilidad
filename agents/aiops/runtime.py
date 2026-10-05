@@ -13,7 +13,8 @@ from domain.aiops_core.acciones import BackendAcciones, BackendDeshabilitado
 from domain.aiops_core.auditoria import Auditoria
 from domain.aiops_core.ciclo import Ciclo
 from domain.aiops_core.observabilidad import ObservabilidadPort
-from domain.aiops_core.politicas import politica_desde_entorno
+from domain.aiops_core.politicas import Politica, politica_desde_entorno
+from domain.aiops_core.repositorio import RepositorioIncidentes
 from domain.aiops_core.simulador import EntornoSimulado
 
 # Escenario de demo por defecto: un fallo de cada categoria del catalogo.
@@ -44,10 +45,31 @@ def _armar() -> Ciclo:
         backend = BackendDeshabilitado()
     else:
         raise ValueError(f"AIOPS_BACKEND desconocido: {backend_nombre!r}")
+
+    politica = politica_desde_entorno()
     ruta = os.environ.get("AIOPS_AUDIT_FILE", "").strip()
-    return Ciclo(
-        observabilidad, backend, politica_desde_entorno(), Auditoria(Path(ruta) if ruta else None)
-    )
+    on_evento = None
+    repositorio: RepositorioIncidentes | None = None
+    # Default "memoria": no cambia el comportamiento de make aiops-demo/evals (que no
+    # necesitan sobrevivir un reinicio). "postgres" lo activa la API de la Fase 2, que
+    # si lo necesita (ver docs/plan-aiops.md Fase 1).
+    if os.environ.get("AIOPS_PERSISTENCIA", "memoria") == "postgres":
+        from infra.auditoria_postgres import crear_sink_postgres
+        from infra.incidentes_postgres import RepositorioIncidentesPostgres
+        from infra.kill_switch import kill_switch_postgres
+
+        repositorio = RepositorioIncidentesPostgres()
+        on_evento = crear_sink_postgres()
+        politica = Politica(
+            nivel=politica.nivel,
+            entornos_permitidos=politica.entornos_permitidos,
+            servicios_permitidos=politica.servicios_permitidos,
+            umbral_confianza=politica.umbral_confianza,
+            max_reintentos=politica.max_reintentos,
+            kill_switch=kill_switch_postgres(),
+        )
+    auditoria = Auditoria(Path(ruta) if ruta else None, on_evento=on_evento)
+    return Ciclo(observabilidad, backend, politica, auditoria, repositorio=repositorio)
 
 
 def get_ciclo() -> Ciclo:

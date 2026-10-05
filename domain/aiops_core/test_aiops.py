@@ -13,7 +13,7 @@ from domain.aiops_core.acciones import (
     ejecutar_accion,
     validar_servicio,
 )
-from domain.aiops_core.auditoria import Auditoria
+from domain.aiops_core.auditoria import Auditoria, Evento
 from domain.aiops_core.catalogo import CATALOGO, Senal, categoria_para_alerta
 from domain.aiops_core.ciclo import Ciclo, ErrorCiclo
 from domain.aiops_core.modelos import (
@@ -453,6 +453,16 @@ def test_auditoria_en_archivo(tmp_path: Path) -> None:
     aud.registrar("INC-2", "abierto")
     assert len(ruta.read_text().splitlines()) == 2
     assert len(aud.de_incidente("INC-1")) == 1
+
+
+def test_auditoria_llama_on_evento() -> None:
+    """Punto de extension para infra/auditoria_postgres.py (Fase 1): se llama con
+    cada evento, ademas de (no en vez de) guardarlo en memoria/archivo."""
+    recibidos: list[Evento] = []
+    aud = Auditoria(on_evento=recibidos.append)
+    aud.registrar("INC-1", "abierto", alerta="x")
+    assert len(recibidos) == 1
+    assert recibidos[0] is aud.eventos[0]
 
 
 def test_metricas_tra_mttr_rollback() -> None:
