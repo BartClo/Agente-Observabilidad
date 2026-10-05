@@ -1,0 +1,9 @@
+# Nunca hace falta en la imagen: reduce el build context (antes se mandaba el repo
+# entero en cada build, incluido .mypy_cache que puede pesar decenas de MB).
+.git
+.mypy_cache
+.pytest_cache
+.ruff_cache
+**/__pycache__
+.env
+k8s-lab
