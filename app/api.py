@@ -1,0 +1,183 @@
+"""API HTTP del agente aiops (Fase 2 de docs/plan-aiops.md).
+
+No ejecuta el agente inline salvo el webhook, que solo encola (ver
+agents/aiops/worker_jobs.py); el resto son operaciones de lectura/escritura directas
+sobre domain/aiops_core via agents.aiops.runtime.get_ciclo().
+
+El kill switch (`/kill-switch`) siempre lee/escribe la tabla Postgres
+(`infra/kill_switch.py`), sin importar `AIOPS_PERSISTENCIA`: Postgres no es opcional
+en este proyecto (a diferencia de Redis/Qdrant), y el control-plane de la API tiene
+que ser la misma fuente de verdad para todos los procesos. Solo gobierna la politica
+de un `Ciclo` que corra con `AIOPS_PERSISTENCIA=postgres` (ver runtime.py): en modo
+"memoria" (demo/evals) el kill switch sigue siendo el de variable de entorno/archivo.
+"""
+
+from __future__ import annotations
+
+import dataclasses
+import os
+from typing import Annotated, Any
+
+from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi.responses import PlainTextResponse
+
+from agents.aiops import runtime
+from domain.aiops_core import metricas
+from domain.aiops_core.auditoria import Evento
+from domain.aiops_core.ciclo import ErrorCiclo
+from domain.aiops_core.modelos import Incidente
+from infra import kill_switch
+
+app = FastAPI(title="aiops API")
+
+
+def requiere_token(authorization: Annotated[str | None, Header()] = None) -> None:
+    token = os.environ.get("AIOPS_API_TOKEN", "").strip()
+    if not token:
+        raise HTTPException(500, "AIOPS_API_TOKEN no configurado")
+    if authorization != f"Bearer {token}":
+        raise HTTPException(401, "token invalido o ausente")
+
+
+_AUTENTICADO = [Depends(requiere_token)]
+
+
+@app.get("/salud")
+def salud() -> dict[str, str]:
+    return {"estado": "ok"}
+
+
+def _resumen(inc: Incidente) -> dict[str, Any]:
+    return {
+        "id": inc.id,
+        "estado": inc.estado,
+        "servicio": inc.alerta.servicio,
+        "entorno": inc.alerta.entorno,
+        "alerta": inc.alerta.nombre,
+        "categoria": inc.categoria_id,
+        "elegible": inc.elegible,
+        "verificado": inc.verificado,
+        "resuelto_autonomo": inc.resuelto_autonomo,
+        "intervencion_humana": inc.intervencion_humana,
+    }
+
+
+@app.get("/incidentes", dependencies=_AUTENTICADO)
+def listar_incidentes() -> list[dict[str, Any]]:
+    return [_resumen(i) for i in runtime.get_ciclo().incidentes()]
+
+
+def _eventos_de(incidente_id: str) -> list[Evento]:
+    # El proceso que atendio el incidente (el worker, ver worker_jobs.py) no es el
+    # mismo que responde esta request (la API): Auditoria.eventos vive en memoria de
+    # CADA proceso, asi que en modo postgres hay que releer desde ahi, no de
+    # ciclo.auditoria (que solo tiene lo que vio ESTE proceso).
+    if os.environ.get("AIOPS_PERSISTENCIA") == "postgres":
+        from infra.auditoria_postgres import eventos_de_incidente
+
+        return eventos_de_incidente(incidente_id)
+    return runtime.get_ciclo().auditoria.de_incidente(incidente_id)
+
+
+@app.get("/incidentes/{incidente_id}", dependencies=_AUTENTICADO)
+def ver_incidente(incidente_id: str) -> dict[str, Any]:
+    try:
+        inc = runtime.get_ciclo().incidente(incidente_id)
+    except ErrorCiclo as exc:
+        raise HTTPException(404, str(exc)) from exc
+    return {
+        **_resumen(inc),
+        "causa": inc.causa,
+        "confianza": inc.confianza,
+        "motivo_escalamiento": inc.motivo_escalamiento,
+        "acciones": [dataclasses.asdict(a) for a in inc.acciones],
+        "aprobacion": dataclasses.asdict(inc.aprobacion) if inc.aprobacion else None,
+        "linea_de_tiempo": [
+            {"ts": e.ts, "tipo": e.tipo, "datos": e.datos} for e in _eventos_de(incidente_id)
+        ],
+    }
+
+
+@app.post("/incidentes/{incidente_id}/aprobar", dependencies=_AUTENTICADO)
+def aprobar_incidente(incidente_id: str, body: dict[str, str]) -> dict[str, str]:
+    usuario = body.get("usuario")
+    if not usuario:
+        raise HTTPException(422, "falta 'usuario'")
+    try:
+        runtime.get_ciclo().aprobar(incidente_id, usuario)
+    except ErrorCiclo as exc:
+        raise HTTPException(404, str(exc)) from exc
+    return {"estado": "aprobado"}
+
+
+@app.post("/incidentes/{incidente_id}/rechazar", dependencies=_AUTENTICADO)
+def rechazar_incidente(incidente_id: str, body: dict[str, str]) -> dict[str, str]:
+    usuario, motivo = body.get("usuario"), body.get("motivo", "")
+    if not usuario:
+        raise HTTPException(422, "falta 'usuario'")
+    try:
+        paquete = runtime.get_ciclo().rechazar(incidente_id, usuario, motivo)
+    except ErrorCiclo as exc:
+        raise HTTPException(404, str(exc)) from exc
+    return {"estado": "rechazado", "paquete": paquete}
+
+
+@app.get("/kill-switch", dependencies=_AUTENTICADO)
+def leer_kill_switch() -> dict[str, Any]:
+    return {"activo": kill_switch.leer()}
+
+
+@app.post("/kill-switch", dependencies=_AUTENTICADO)
+def cambiar_kill_switch(body: dict[str, Any]) -> dict[str, Any]:
+    usuario = body.get("usuario")
+    if not usuario:
+        raise HTTPException(422, "falta 'usuario'")
+    if body.get("activo"):
+        kill_switch.activar(usuario, body.get("motivo", ""))
+    else:
+        kill_switch.desactivar(usuario)
+    return {"activo": kill_switch.leer()}
+
+
+@app.get("/metricas", dependencies=_AUTENTICADO)
+def ver_metricas() -> dict[str, Any]:
+    incidentes = runtime.get_ciclo().incidentes()
+    resultado: dict[str, Any] = {"total_incidentes": len(incidentes)}
+    for nombre, fn in (
+        ("tra", metricas.tasa_resolucion_autonoma),
+        ("mttr_segundos", metricas.mttr),
+        ("tasa_rollback", metricas.tasa_rollback),
+    ):
+        try:
+            resultado[nombre] = fn(incidentes)
+        except ValueError:
+            resultado[nombre] = None
+    return resultado
+
+
+@app.get("/metrics", response_class=PlainTextResponse)
+def metricas_prometheus() -> str:
+    """Formato de exposicion de Prometheus (no requiere token: es lo que el propio
+    Prometheus/Grafana scrapea). Ver docs/plan-aiops.md Fase 2."""
+    incidentes = runtime.get_ciclo().incidentes()
+    lineas = [
+        "# HELP aiops_incidentes_total Incidentes por estado.",
+        "# TYPE aiops_incidentes_total gauge",
+    ]
+    por_estado: dict[str, int] = {}
+    for i in incidentes:
+        por_estado[str(i.estado)] = por_estado.get(str(i.estado), 0) + 1
+    for estado, n in sorted(por_estado.items()):
+        lineas.append(f'aiops_incidentes_total{{estado="{estado}"}} {n}')
+    tra_help = "Tasa de resolucion autonoma (0 a 100)."
+    for nombre, help_, fn in (
+        ("aiops_tra_ratio", tra_help, metricas.tasa_resolucion_autonoma),
+        ("aiops_mttr_seconds", "MTTR en segundos.", metricas.mttr),
+    ):
+        lineas.append(f"# HELP {nombre} {help_}")
+        lineas.append(f"# TYPE {nombre} gauge")
+        try:
+            lineas.append(f"{nombre} {fn(incidentes)}")
+        except ValueError:
+            pass
+    return "\n".join(lineas) + "\n"
