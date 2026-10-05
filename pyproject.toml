@@ -22,6 +22,10 @@ dependencies = [
     # exacto: version real resuelta por `uv add alembic` dentro del contenedor el
     # 2026-10-05, no adivinada (ver docs/open-questions.md).
     "alembic==1.20.0",
+    # Checkpointer de LangGraph para reanudar las pausas de aprobacion (nivel 2,
+    # Fase 1/2). Pin exacto confirmado en PyPI el 2026-10-05 (ver docs/open-questions.md)
+    # y re-confirmado al instalar: resuelve sin conflictos con deepagents==0.7.19.
+    "langgraph-checkpoint-postgres==3.1.2",
 ]
 
 [dependency-groups]
