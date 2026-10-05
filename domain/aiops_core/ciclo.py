@@ -18,6 +18,7 @@ from domain.aiops_core.catalogo import CATALOGO, CategoriaL1, categoria_para_ale
 from domain.aiops_core.modelos import AccionEjecutada, Aprobacion, Estado, Incidente, Severidad
 from domain.aiops_core.observabilidad import ObservabilidadPort
 from domain.aiops_core.politicas import Politica, Veredicto
+from domain.aiops_core.repositorio import RepositorioIncidentes, RepositorioIncidentesMemoria
 
 
 class ErrorCiclo(ValueError):
@@ -39,24 +40,34 @@ class Ciclo:
         politica: Politica,
         auditoria: Auditoria,
         reloj: Callable[[], float] = time.time,
+        repositorio: RepositorioIncidentes | None = None,
     ) -> None:
         self._obs = observabilidad
         self._backend = backend
         self.politica = politica
         self.auditoria = auditoria
         self._reloj = reloj
-        self._incidentes: dict[str, Incidente] = {}
+        # Default: en memoria, se pierde al reiniciar (igual que antes de la Fase 1).
+        # infra.incidentes_postgres.RepositorioIncidentesPostgres sobrevive reinicios.
+        self._repo = repositorio if repositorio is not None else RepositorioIncidentesMemoria()
 
     # --- consulta -----------------------------------------------------------------
 
     def incidentes(self) -> list[Incidente]:
-        return list(self._incidentes.values())
+        return self._repo.listar()
 
     def incidente(self, incidente_id: str) -> Incidente:
-        try:
-            return self._incidentes[incidente_id]
-        except KeyError:
-            raise ErrorCiclo(f"Incidente {incidente_id!r} no existe") from None
+        inc = self._repo.obtener(incidente_id)
+        if inc is None:
+            raise ErrorCiclo(f"Incidente {incidente_id!r} no existe")
+        return inc
+
+    def _guardar(self, inc: Incidente) -> Incidente:
+        """Persiste el incidente tras cada mutacion. Con el repositorio en memoria es
+        redundante (el dataclass ya es mutable in-place), pero con Postgres es lo unico
+        que hace el cambio visible entre reinicios/procesos (ver docs/plan-aiops.md Fase 1)."""
+        self._repo.guardar(inc)
+        return inc
 
     def _categoria(self, inc: Incidente) -> CategoriaL1:
         if inc.categoria_id is None:
@@ -87,7 +98,7 @@ class Ciclo:
         en vez de reabrir el viejo: evita que se lea como ya resuelto algo que volvio
         a fallar (ver docs/plan-aiops.md Fase 0.5)."""
         base_id = f"INC-{alerta_id}"
-        existente = self._incidentes.get(base_id)
+        existente = self._repo.obtener(base_id)
         if existente is not None and existente.estado not in self._ESTADOS_TERMINALES:
             return existente
         alerta = next((a for a in self._obs.alertas_activas() if a.id == alerta_id), None)
@@ -96,11 +107,11 @@ class Ciclo:
         incidente_id = base_id
         if existente is not None:
             n = 2
-            while f"{base_id}-{n}" in self._incidentes:
+            while self._repo.obtener(f"{base_id}-{n}") is not None:
                 n += 1
             incidente_id = f"{base_id}-{n}"
         inc = Incidente(id=incidente_id, alerta=alerta, abierto_en=self._reloj())
-        self._incidentes[incidente_id] = inc
+        self._guardar(inc)
         self.auditoria.registrar(incidente_id, "abierto", alerta=alerta.nombre)
         return inc
 
@@ -127,6 +138,7 @@ class Ciclo:
         inc.anomalia_confirmada = confirmada
         if confirmada:
             inc.estado = Estado.CONFIRMADO
+        self._guardar(inc)
         self.auditoria.registrar(
             incidente_id, "confirmacion", confirmada=confirmada, detalle=detalle
         )
@@ -148,6 +160,7 @@ class Ciclo:
             motivos.append("severidad critica")
         inc.elegible = not motivos
         inc.estado = Estado.CLASIFICADO
+        self._guardar(inc)
         self.auditoria.registrar(
             incidente_id,
             "clasificacion",
@@ -171,6 +184,7 @@ class Ciclo:
             )
         inc.causa, inc.confianza, inc.runbook_id = causa, confianza, runbook_id
         inc.estado = Estado.DIAGNOSTICADO
+        self._guardar(inc)
         self.auditoria.registrar(
             incidente_id, "diagnostico", causa=causa, confianza=confianza, runbook=runbook_id
         )
@@ -190,6 +204,7 @@ class Ciclo:
         no alcanza con que el framework haya pausado el grafo (ver Aprobacion)."""
         inc = self.incidente(incidente_id)
         inc.aprobacion = Aprobacion(usuario, self._reloj(), "aprobado")
+        self._guardar(inc)
         self.auditoria.registrar(incidente_id, "aprobacion", usuario=usuario, veredicto="aprobado")
 
     def rechazar(self, incidente_id: str, usuario: str, motivo: str) -> str:
@@ -197,6 +212,7 @@ class Ciclo:
         intervencion humana, nunca reintenta la accion por su cuenta."""
         inc = self.incidente(incidente_id)
         inc.aprobacion = Aprobacion(usuario, self._reloj(), "rechazado")
+        self._guardar(inc)
         self.auditoria.registrar(
             incidente_id, "aprobacion", usuario=usuario, veredicto="rechazado", motivo=motivo
         )
@@ -226,6 +242,7 @@ class Ciclo:
             detalle = f"{senal.metrica}={valor:g}; exigido {senal.describir()} -> " + (
                 "recuperado" if inc.verificado else "NO recuperado"
             )
+        self._guardar(inc)
         self.auditoria.registrar(incidente_id, "verificacion", ok=inc.verificado, detalle=detalle)
         return inc.verificado, detalle
 
@@ -237,6 +254,7 @@ class Ciclo:
             )
         inc.estado = Estado.RESUELTO
         inc.cerrado_en = self._reloj()
+        self._guardar(inc)
         self.auditoria.registrar(
             incidente_id, "cerrado", autonomo=inc.resuelto_autonomo, acciones=len(inc.acciones)
         )
@@ -247,6 +265,7 @@ class Ciclo:
         if inc.anomalia_confirmada:
             raise ErrorCiclo("La anomalia esta confirmada: no es un falso positivo")
         inc.estado = Estado.DESCARTADO
+        self._guardar(inc)
         self.auditoria.registrar(incidente_id, "descartado")
         return inc
 
@@ -257,6 +276,7 @@ class Ciclo:
         inc.estado = Estado.ESCALADO
         inc.intervencion_humana = True
         inc.motivo_escalamiento = motivo
+        self._guardar(inc)
         self.auditoria.registrar(incidente_id, "escalado", motivo=motivo)
         eventos = "\n".join(
             f"  - {e.tipo}: {e.datos}" for e in self.auditoria.de_incidente(incidente_id)
@@ -319,6 +339,7 @@ class Ciclo:
             inc.intervencion_humana = True  # una aprobacion humana no cuenta como autonoma
         inc.verificado = False  # cualquier accion invalida una verificacion previa
         inc.estado = Estado.ACCION_EJECUTADA
+        self._guardar(inc)
         self.auditoria.registrar(inc.id, "accion", accion=accion, ok=ok, resultado=resultado)
         estado = "ejecutada" if ok else "FALLO"
         return ResultadoEjecucion(

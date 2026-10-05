@@ -24,6 +24,7 @@ from domain.aiops_core.modelos import (
     Severidad,
 )
 from domain.aiops_core.politicas import Politica, Veredicto, politica_desde_entorno
+from domain.aiops_core.repositorio import RepositorioIncidentesMemoria
 from domain.aiops_core.simulador import EntornoSimulado
 
 
@@ -497,6 +498,22 @@ def test_mttr_usa_disparada_en_cuando_esta_disponible() -> None:
     inc = ciclo.cerrar(inc_id)
     assert inc.alerta.disparada_en == 0.0
     assert metricas.mttr([inc]) == pytest.approx(inc.cerrado_en)  # desde 0.0, no abierto_en
+
+
+def test_repositorio_en_memoria_es_el_default_y_es_intercambiable() -> None:
+    """RepositorioIncidentesMemoria es el default de Ciclo (mismo comportamiento que
+    antes de la Fase 1). Un repositorio propio (ej. Postgres) es intercambiable sin
+    tocar Ciclo: ver infra/incidentes_postgres.py."""
+    repo = RepositorioIncidentesMemoria()
+    assert repo.listar() == [] and repo.obtener("INC-X") is None
+
+    env = EntornoSimulado()
+    a = env.inyectar_fallo("checkout", "servicio_detenido")
+    politica = Politica(nivel=NivelAutonomia.AUTONOMO_BAJO_RIESGO)
+    ciclo = Ciclo(env, env, politica, Auditoria(), repositorio=repo)
+    inc_id = preparar(ciclo, a.id)
+    assert repo.obtener(inc_id) is ciclo.incidente(inc_id)
+    assert repo.listar() == [ciclo.incidente(inc_id)]
 
 
 def test_metricas_casos_borde() -> None:
