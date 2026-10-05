@@ -92,28 +92,49 @@ escribió otro (`tests/test_infra_incidentes_postgres.py::test_sobrevive_accione
 simulando un reinicio a mitad del incidente. 104 tests en verde, mypy estricto sin
 errores, coverage `domain/` 99.40%.
 
-## Fase 2: API HTTP (FastAPI)
-- [ ] Añadir `fastapi` y `uvicorn` y exponer `app/api.py` en el servicio `app` del compose.
-- [ ] `POST /webhooks/grafana`: recibe el payload de alertas de Grafana (contact point de
-      tipo webhook; trae un array `alerts`), valida el token compartido y procesa **cada
-      alerta del array por separado**, deduplicando por fingerprint. Una alerta con
-      `status: resolved` para un incidente que el agente no cerró todavía se audita pero
-      no fuerza el cierre automático (queda para revisión). Encola cada incidente nuevo en
-      RQ (`infra/queue.py`, profile `redis`); el worker ejecuta el agente.
-- [ ] `GET /incidentes`, `GET /incidentes/{id}` (con línea de tiempo de auditoría).
-- [ ] `POST /incidentes/{id}/aprobar` y `/rechazar`: registran la aprobación en el dominio
-      (`Ciclo.aprobar`/`rechazar` de la Fase 0.5, con el usuario que la autentica) y
-      reanudan el grafo pausado por `interrupt_on` (Command resume de LangGraph).
-- [ ] `GET|POST /kill-switch`: lee y activa el kill switch sobre la tabla `kill_switch` de
-      Postgres (Fase 1), con auditoría del cambio. Reemplaza la variable de entorno/archivo
-      actual, que no sirve para un proceso ya corriendo.
-- [ ] `GET /metricas`: TRA, MTTR, tasa de rollback y escalamientos, en JSON.
-- [ ] `GET /metrics` en formato Prometheus (`aiops_incidentes_total{estado}`,
-      `aiops_mttr_seconds`, `aiops_tra_ratio`, `aiops_acciones_total{accion,ok}`) para graficar en Grafana.
-- [ ] Autenticación: token compartido simple (`AIOPS_API_TOKEN`) validado en cabecera
-      `Authorization`; alcanza para el alcance de la tesis (sin tabla de usuarios/roles).
-- [ ] Tests de la API con `TestClient` y payloads reales de Grafana guardados como fixtures
-      (incluyendo payload con `alerts` agrupadas y uno con `status: resolved`).
+## Fase 2: API HTTP (FastAPI) — ✅ hecho 2026-10-05
+- [x] `fastapi`/`uvicorn`/`httpx` agregados; `app/api.py` (no se agregó el servicio al
+      compose todavía: se corre con `uvicorn` manualmente o en la Fase 6). Commit `f04959d`.
+- [x] `POST /webhooks/grafana`: procesa cada alerta del array `alerts`, dedupea por
+      job_id (ver `infra/alertas_webhook.py`: `alerta.id` incluye `fingerprint`/`startsAt`,
+      distinto por disparo real) y encola en RQ (`infra/queue.py`, cola `aiops`).
+      `status: resolved` se encola igual pero el worker solo audita
+      (`Ciclo.notificar_resuelta_en_origen`), nunca fuerza el cierre. **Decisión tomada
+      en el camino:** se agregó `Ciclo.abrir_desde_alerta`/`notificar_resuelta_en_origen`
+      en vez de un adaptador puente push/pull — el webhook entrega la alerta completa,
+      no hace falta que `Ciclo` la busque en `alertas_activas()`. Commits `0a841b3`, `a7a0498`.
+- [x] `GET /incidentes`, `GET /incidentes/{id}` con línea de tiempo. En modo
+      `AIOPS_PERSISTENCIA=postgres` relee la auditoría desde Postgres
+      (`infra/auditoria_postgres.eventos_de_incidente`), no desde `ciclo.auditoria`:
+      el proceso que atendió el incidente (el worker) no es el que responde la
+      request (la API), así que la `Auditoria` en memoria de la API nunca vio esos
+      eventos. Commit `f04959d`.
+- [x] `POST /incidentes/{id}/aprobar` y `/rechazar`: envuelven `Ciclo.aprobar`/`rechazar`
+      de la Fase 0.5. **No** reanudan `Command(resume=...)` de LangGraph: ver la nota de
+      alcance de la Fase 1 sobre el checkpointer — necesita un grafo real pausado por
+      `interrupt_on` para probarse, y no hay `ANTHROPIC_API_KEY` en esta sesión. El
+      invariante del dominio (`ejecutar_remediacion(aprobada=True)` exige una
+      `Aprobacion` registrada) sí queda satisfecho por este endpoint. Commit `f04959d`.
+- [x] `GET|POST /kill-switch`: siempre contra la tabla Postgres (`infra/kill_switch.py`),
+      sin importar `AIOPS_PERSISTENCIA` del `Ciclo` que responda — Postgres no es
+      opcional en este proyecto, a diferencia de Redis/Qdrant. Gobierna la política de
+      cualquier `Ciclo` corriendo con `AIOPS_PERSISTENCIA=postgres`. Commit `f04959d`.
+- [x] `GET /metricas` (JSON: TRA, MTTR, tasa de rollback) y `GET /metrics` (formato
+      Prometheus: `aiops_incidentes_total{estado}`, `aiops_tra_ratio`,
+      `aiops_mttr_seconds`; sin token, para que Prometheus/Grafana lo scrapee).
+      `aiops_acciones_total{accion,ok}` quedó pendiente (no crítico: se puede derivar
+      de `/metricas` o sumarlo después). Commit `f04959d`.
+- [x] Autenticación: token compartido simple (`AIOPS_API_TOKEN`), cabecera
+      `Authorization: Bearer <token>`.
+- [x] Tests con `TestClient`: 6 contra Postgres real (`tests/test_api.py`) + 4 contra
+      Redis real (`tests/test_api_webhook.py`, con skip automático si el profile
+      `redis` no está levantado — no rompe `make test` para quien no lo tenga arriba).
+
+**Criterio de cierre:** ⚠️ parcial. Un `curl` con un payload de Grafana sí llega a
+`abrir_desde_alerta`/auditoría (probado). Lo que falta para el criterio completo
+("termina en un incidente resuelto"): que el worker real invoque al agente con un
+`ANTHROPIC_API_KEY` válido — `agents/aiops/worker_jobs.py` ya tiene el código
+(`build_agent().invoke(...)`), pero no se corrió en vivo en esta sesión.
 
 **Criterio de cierre:** un `curl` con un payload de Grafana termina en un incidente resuelto en el entorno simulado.
 

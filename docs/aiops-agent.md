@@ -71,10 +71,23 @@ backend de acciones real, así que toda ejecución falla y el agente escala. Par
 de verdad hay que implementar `BackendAcciones` (por ejemplo con la API de Kubernetes) y
 cablearlo en `agents/aiops/runtime.py`.
 
+## Estado (ver docs/plan-aiops.md para el detalle fase por fase)
+
+Fases 0, 0.5, 1 y 2 completas. El agente tiene: persistencia en Postgres
+(`AIOPS_PERSISTENCIA=postgres`), un webhook (`POST /webhooks/grafana`) que encola en
+RQ, endpoints de incidentes/aprobación/kill switch/métricas, y el checkpointer de
+LangGraph instalado (sin cablear a `create_deep_agent` todavía).
+
 ## Pendiente
 
-- Endpoint HTTP / webhook de Alertmanager y UI (embebible en Grafana).
-- Backend de acciones real.
+- UI embebible en Grafana (Fase 5).
+- Backend de acciones real sobre Kubernetes/k3d (Fase 4).
+- Laboratorio de observabilidad real: Prometheus/Loki/Grafana/RabbitMQ (Fase 3).
+- Cablear el checkpointer a `create_deep_agent`/`Command(resume=...)`: instalado y
+  probado (Fase 1), pero reanudar un grafo pausado de verdad necesita un
+  `ANTHROPIC_API_KEY` real para probarse, no disponible en las sesiones hasta ahora.
+- Verificar en vivo que el worker (`agents/aiops/worker_jobs.py`) resuelve un
+  incidente de punta a punta con el LLM real (mismo motivo: falta la API key).
 - Verificación con espera y reintentos (hoy hace una sola lectura).
 - Línea base de MTTR con datos reales y validación del catálogo L1 con operaciones.
 - Medición del costo en tokens.
