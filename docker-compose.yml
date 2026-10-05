@@ -1,0 +1,145 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.app
+    working_dir: /workspace
+    volumes:
+      - .:/workspace
+    env_file:
+      - .env
+    environment:
+      - DATABASE_URL=${DATABASE_URL:-postgresql://agent:agent@postgres:5432/agents}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    tty: true
+    stdin_open: true
+
+  postgres:
+    # pgvector/pgvector (no el postgres:16-alpine oficial): trae la extension
+    # `vector` precompilada, la necesita rag/store.py.
+    image: pgvector/pgvector:pg16
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER:-agent}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-agent}
+      - POSTGRES_DB=${POSTGRES_DB:-agents}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./docker/postgres-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-agent}"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+
+  # Unico lugar donde se ejecuta codigo del agente QA. Sin red por defecto
+  # y sin acceso a docker.sock. Se invoca puntualmente (`docker compose run sandbox ...`),
+  # no arranca con `make run`.
+  sandbox:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.sandbox
+    network_mode: "none"
+    profiles: ["sandbox"]
+
+  # Opcional. Activar con COMPOSE_PROFILES=redis en .env. Cache/rate-limit/sesion
+  # corta: infra generica, ningun agente la usa todavia (ver infra/README.md).
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+    profiles: ["redis"]
+
+  # Opcional. Mismo profile "redis": COMPOSE_PROFILES=redis levanta redis + worker
+  # juntos. Cola de trabajos generica (RQ): no define que trabajos existen, eso lo
+  # decide quien encola (`infra/queue.py`). Ver infra/README.md.
+  worker:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.app
+    working_dir: /workspace
+    volumes:
+      - .:/workspace
+    env_file:
+      - .env
+    command: ["uv", "run", "rq", "worker", "--url", "${REDIS_URL:-redis://redis:6379/0}", "default"]
+    depends_on:
+      redis:
+        condition: service_healthy
+    profiles: ["redis"]
+
+  # Opcional. Activar con COMPOSE_PROFILES=qdrant en .env. Vector store dedicado,
+  # alternativa a pgvector (rag/) para quien necesite mas escala/features de
+  # busqueda. Infra generica: ningun agente la usa todavia.
+  qdrant:
+    # Pin alineado con qdrant-client en pyproject.toml (protocolo cliente/servidor
+    # debe ir en la misma minor). Ver docs/open-questions.md si se actualiza uno sin el otro.
+    image: qdrant/qdrant:v1.19.1
+    volumes:
+      - qdrant_data:/qdrant/storage
+    profiles: ["qdrant"]
+
+  # Opcional. Activar con COMPOSE_PROFILES=garage en .env. Almacenamiento de
+  # objetos S3-compatible: infra generica, ningun agente lo usa todavia.
+  # Garage (Apache-2.0, self-hosted) en vez de MinIO: la imagen oficial
+  # minio/minio dejo de publicarse gratis en Docker Hub/quay.io desde
+  # 2025-10-15 (paso a licencia AGPL solo-fuente/suscripcion).
+  garage:
+    image: dxflrs/garage:v2.3.0
+    command: ["/garage", "server", "--single-node", "--default-bucket"]
+    environment:
+      # Garage exige access key >=8 caracteres y secret key >=16.
+      - GARAGE_DEFAULT_ACCESS_KEY=${S3_ACCESS_KEY:-agent-access-key}
+      - GARAGE_DEFAULT_SECRET_KEY=${S3_SECRET_KEY:-agentagent-secret}
+      - GARAGE_DEFAULT_BUCKET=${S3_DEFAULT_BUCKET:-default}
+    volumes:
+      - ./docker/garage/garage.toml:/etc/garage.toml:ro
+      - garage_data:/data
+    profiles: ["garage"]
+
+  # Opcional. Activar con COMPOSE_PROFILES=langfuse en .env.
+  # TODO(verificar): version/receta oficial self-host de langfuse compatible solo-Postgres,
+  # ver docs/open-questions.md.
+  langfuse:
+    image: langfuse/langfuse:2
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-agent}:${POSTGRES_PASSWORD:-agent}@postgres:5432/${POSTGRES_DB:-agents}
+      - NEXTAUTH_SECRET=${LANGFUSE_NEXTAUTH_SECRET:-changeme}
+      - SALT=${LANGFUSE_SALT:-changeme}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "3000:3000"
+    profiles: ["langfuse"]
+
+  # Opcional. Activar con COMPOSE_PROFILES=traefik en .env. Reverse proxy hacia
+  # `app`: NO funciona todavia porque app/main.py no expone HTTP (llega en la
+  # etapa 4, endpoint FastAPI). Usa el provider "file" de Traefik, no el
+  # provider "docker" (ese requiere montar docker.sock; ver docker-compose.yml
+  # servicio app y regla del framework de no montarlo).
+  traefik:
+    image: traefik:v3.3
+    command: ["--configFile=/etc/traefik/traefik.yml"]
+    volumes:
+      - ./docker/traefik/traefik.yml:/etc/traefik/traefik.yml:ro
+      - ./docker/traefik/dynamic.yml:/etc/traefik/dynamic.yml:ro
+    ports:
+      - "8080:80" # entrada http
+      - "8081:8080" # dashboard, solo dev
+    depends_on:
+      - app
+    profiles: ["traefik"]
+
+volumes:
+  postgres_data:
+  redis_data:
+  qdrant_data:
+  garage_data:

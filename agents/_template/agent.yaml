@@ -1,0 +1,22 @@
+# Plantilla de agent.yaml. Campos que lee app/loader.py:
+# name, description, model, prompt, tools, skills, require_approval, evals.
+# `rag` es opcional (ver rag/README.md): agrega sola la tool buscar_documentos.
+#   rag:
+#     collection: mi_coleccion
+#     k: 4
+# `mcp_servers` es opcional (ver infra/README.md): agrega las tools de cada
+# servidor MCP declarado.
+#   mcp_servers:
+#     mi_servidor:
+#       transport: stdio
+#       command: python
+#       args: ["/ruta/al/server.py"]
+name: template
+description: "Agente plantilla (hola mundo). Copiar esta carpeta para crear un agente nuevo."
+model: "anthropic:claude-sonnet-5"
+prompt: prompt.md
+tools:
+  - tools:say_hello
+skills: skills
+require_approval: []
+evals: evals

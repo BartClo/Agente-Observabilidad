@@ -1,0 +1,20 @@
+# Contenedor sandbox: unico lugar donde corre codigo generado por el agente QA.
+# Sin red por defecto (ver docker-compose.yml). No monta docker.sock, no comparte /opt/venv con `app`.
+FROM python:3.12-slim
+
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+
+ENV UV_PROJECT_ENVIRONMENT=/opt/venv \
+    UV_LINK_MODE=copy \
+    PATH="/opt/venv/bin:$PATH" \
+    PYTHONUNBUFFERED=1
+
+WORKDIR /workspace
+
+COPY pyproject.toml ./
+RUN uv sync --no-install-project
+
+COPY . .
+RUN uv sync --no-install-project
+
+CMD ["sleep", "infinity"]

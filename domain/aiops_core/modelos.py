@@ -1,0 +1,82 @@
+"""Tipos del ciclo de incidentes L1. Sin logica: solo datos."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from enum import IntEnum, StrEnum
+
+
+class Severidad(StrEnum):
+    BAJA = "baja"
+    MEDIA = "media"
+    ALTA = "alta"
+    CRITICA = "critica"
+
+
+class NivelAutonomia(IntEnum):
+    """Autonomia gradual de la tesis (seccion "Seguridad y autonomia")."""
+
+    OBSERVA = 0  # solo observa y registra
+    RECOMIENDA = 1  # recomienda diagnostico y accion
+    CON_APROBACION = 2  # ejecuta con aprobacion humana
+    AUTONOMO_BAJO_RIESGO = 3  # ejecuta solo acciones L1 de bajo riesgo
+    AUTONOMO_CON_ROLLBACK = 4  # ejecuta, verifica y revierte dentro de limites
+
+
+class Estado(StrEnum):
+    ABIERTO = "abierto"
+    CONFIRMADO = "confirmado"
+    CLASIFICADO = "clasificado"
+    DIAGNOSTICADO = "diagnosticado"
+    ACCION_EJECUTADA = "accion_ejecutada"
+    RESUELTO = "resuelto"
+    ESCALADO = "escalado"
+    DESCARTADO = "descartado"
+
+
+@dataclass(frozen=True)
+class Alerta:
+    id: str
+    nombre: str
+    servicio: str
+    entorno: str
+    severidad: Severidad
+    resumen: str
+
+
+@dataclass(frozen=True)
+class AccionEjecutada:
+    nombre: str
+    servicio: str
+    resultado: str
+    ok: bool
+    es_rollback: bool = False
+
+
+@dataclass
+class Incidente:
+    id: str
+    alerta: Alerta
+    abierto_en: float
+    estado: Estado = Estado.ABIERTO
+    categoria_id: str | None = None
+    anomalia_confirmada: bool = False
+    elegible: bool = False
+    causa: str | None = None
+    confianza: float = 0.0
+    runbook_id: str | None = None
+    acciones: list[AccionEjecutada] = field(default_factory=list)
+    verificado: bool = False
+    intervencion_humana: bool = False
+    cerrado_en: float | None = None
+    motivo_escalamiento: str | None = None
+
+    @property
+    def intentos(self) -> int:
+        """Remediaciones intentadas (el rollback no cuenta como reintento)."""
+        return sum(1 for a in self.acciones if not a.es_rollback)
+
+    @property
+    def resuelto_autonomo(self) -> bool:
+        """Resuelto y verificado sin intervencion humana (numerador de la TRA)."""
+        return self.estado is Estado.RESUELTO and self.verificado and not self.intervencion_humana
