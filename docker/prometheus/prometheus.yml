@@ -34,6 +34,31 @@ scrape_configs:
       - targets: ["rabbitmq:15692"]
         labels: {service: worker, env: dev}
 
+  # disco_lleno: node_exporter sobre el tmpfs de 50MB (billing_disk), no el disco
+  # real del host. mountpoint "/data": ajustar AIOPS_DISK_MOUNTPOINT=/data al correr
+  # el agente contra este laboratorio (ver infra/observabilidad.py).
+  - job_name: node-exporter-billing
+    static_configs:
+      - targets: ["node-exporter-billing:9100"]
+        labels: {service: billing, env: dev}
+
+  # certificado_por_vencer: blackbox_exporter sondea el TLS de "gateway" (cert
+  # autofirmado que vence pronto, ver docker/nginx/certs/).
+  - job_name: blackbox-gateway
+    metrics_path: /probe
+    params:
+      module: [http_2xx]
+    static_configs:
+      - targets: ["https://gateway/"]
+        labels: {service: gateway, env: dev}
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox-exporter:9115
+
   - job_name: prometheus
     static_configs:
       - targets: ["localhost:9090"]

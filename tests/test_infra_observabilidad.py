@@ -158,6 +158,26 @@ def test_metrica_usa_la_etiqueta_de_servicio_configurada() -> None:
     assert "job=" not in query
 
 
+def test_mountpoint_de_disco_configurable() -> None:
+    """AIOPS_DISK_MOUNTPOINT (Fase 3): node_exporter en el laboratorio real puede
+    no tener acceso al "/" del host; el mountpoint a vigilar tiene que ser
+    configurable igual que la etiqueta de servicio."""
+    import urllib.parse
+
+    obs = Falso(
+        {"/api/v1/query": {"data": {"result": [{"value": [0, "40"]}]}}},
+        mountpoint="/data",
+    )
+    obs.metrica("billing", "disk_usage_percent")
+    query = urllib.parse.parse_qs(urllib.parse.urlsplit(obs.urls[-1]).query)["query"][0]
+    assert 'mountpoint="/data"' in query
+
+    default = PrometheusLoki("http://p")
+    assert 'mountpoint="/"' in default._consultas["disk_usage_percent"].format(
+        s="x", l="job", m=default._mountpoint
+    )
+
+
 def test_logs() -> None:
     obs = Falso(
         {

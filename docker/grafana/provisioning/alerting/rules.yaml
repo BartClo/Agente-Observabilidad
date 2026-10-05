@@ -98,3 +98,65 @@ groups:
         for: 10s
         noDataState: OK
         execErrState: Alerting
+
+      - uid: aiops-disk-usage-high
+        title: DiskUsageHigh
+        condition: umbral
+        data:
+          - refId: consulta
+            relativeTimeRange: { from: 60, to: 0 }
+            datasourceUid: prometheus-lab
+            model:
+              expr: >-
+                100 * max(1 - node_filesystem_avail_bytes{job="node-exporter-billing",mountpoint="/data"}
+                / node_filesystem_size_bytes{job="node-exporter-billing",mountpoint="/data"})
+              instant: true
+              refId: consulta
+          - refId: umbral
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: consulta
+              conditions:
+                - evaluator: { type: gt, params: [85] }
+              refId: umbral
+        labels:
+          alertname: DiskUsageHigh
+          service: billing
+          env: dev
+          severity: alta
+        annotations:
+          summary: "Disco de billing (tmpfs 50MB) por encima del 85%"
+        for: 10s
+        noDataState: OK
+        execErrState: Alerting
+
+      - uid: aiops-cert-expiring-soon
+        title: CertExpiringSoon
+        condition: umbral
+        data:
+          - refId: consulta
+            relativeTimeRange: { from: 60, to: 0 }
+            datasourceUid: prometheus-lab
+            model:
+              expr: (min(probe_ssl_earliest_cert_expiry{service="gateway"}) - time()) / 86400
+              instant: true
+              refId: consulta
+          - refId: umbral
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: consulta
+              conditions:
+                - evaluator: { type: lt, params: [14] }
+              refId: umbral
+        labels:
+          alertname: CertExpiringSoon
+          service: gateway
+          env: dev
+          severity: media
+        annotations:
+          summary: "Certificado de gateway vence en menos de 14 dias"
+        for: 10s
+        noDataState: OK
+        execErrState: Alerting

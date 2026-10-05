@@ -22,12 +22,15 @@ from infra.alertas_comun import parse_timestamp_iso, severidad_desde_label
 
 # metrica del catalogo -> PromQL. `{s}` se reemplaza por el servicio ya validado;
 # `{l}` por la etiqueta que identifica el servicio (AIOPS_SERVICE_LABEL, "job" por
-# defecto: la misma etiqueta que usan alertas_activas()/logs(), no una fija distinta).
+# defecto: la misma etiqueta que usan alertas_activas()/logs(), no una fija distinta);
+# `{m}` por el mountpoint a vigilar (AIOPS_DISK_MOUNTPOINT, "/" por defecto -- en el
+# laboratorio real node_exporter puede no tener acceso al "/" del host, ver
+# docker-compose.yml servicio node-exporter-billing).
 CONSULTAS_POR_DEFECTO: dict[str, str] = {
     "up": 'max(up{{{l}="{s}"}})',
     "disk_usage_percent": (
-        '100 * max(1 - node_filesystem_avail_bytes{{{l}="{s}",mountpoint="/"}}'
-        ' / node_filesystem_size_bytes{{{l}="{s}",mountpoint="/"}})'
+        '100 * max(1 - node_filesystem_avail_bytes{{{l}="{s}",mountpoint="{m}"}}'
+        ' / node_filesystem_size_bytes{{{l}="{s}",mountpoint="{m}"}})'
     ),
     "pod_ready": 'sum(kube_pod_status_ready{{condition="true",pod=~"{s}-.*"}})',
     "queue_consumers_active": 'sum(rabbitmq_queue_consumers{{queue="{s}"}})',
@@ -42,12 +45,14 @@ class PrometheusLoki:
         loki_url: str | None = None,
         consultas: Mapping[str, str] | None = None,
         etiqueta_servicio: str = "service",
+        mountpoint: str = "/",
         timeout_s: float = 10.0,
     ) -> None:
         self._prom = prometheus_url.rstrip("/")
         self._loki = loki_url.rstrip("/") if loki_url else None
         self._consultas = dict(consultas or CONSULTAS_POR_DEFECTO)
         self._etiqueta = etiqueta_servicio
+        self._mountpoint = mountpoint
         self._timeout = timeout_s
 
     @classmethod
@@ -56,6 +61,7 @@ class PrometheusLoki:
             prometheus_url=os.environ["AIOPS_PROMETHEUS_URL"],
             loki_url=os.environ.get("AIOPS_LOKI_URL") or None,
             etiqueta_servicio=os.environ.get("AIOPS_SERVICE_LABEL", "service"),
+            mountpoint=os.environ.get("AIOPS_DISK_MOUNTPOINT", "/"),
         )
 
     def _get(self, url: str) -> Any:
@@ -96,7 +102,7 @@ class PrometheusLoki:
         plantilla = self._consultas.get(nombre)
         if plantilla is None:
             return None
-        query = plantilla.format(s=validar_servicio(servicio), l=self._etiqueta)
+        query = plantilla.format(s=validar_servicio(servicio), l=self._etiqueta, m=self._mountpoint)
         url = f"{self._prom}/api/v1/query?" + urllib.parse.urlencode({"query": query})
         resultado = self._get(url).get("data", {}).get("result", [])
         if not resultado:

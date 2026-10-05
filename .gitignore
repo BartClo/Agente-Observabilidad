@@ -10,3 +10,6 @@ __pycache__/
 *.egg-info/
 .DS_Store
 .claude/
+# Certificado autofirmado del laboratorio (Fase 3, escenario certificado_por_vencer):
+# se regenera, ver k8s-lab/README.md. Nunca commitear una clave privada, ni de prueba.
+docker/nginx/certs/

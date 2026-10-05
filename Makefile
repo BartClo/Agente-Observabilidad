@@ -2,7 +2,9 @@ COMPOSE = docker compose
 RUN = $(COMPOSE) run --rm app
 
 .PHONY: build lock check lint format typecheck test coverage evals run shell down logs \
-	rag-init-db rag-ingest rag-query aiops-ingest aiops-demo migrate migrate-down
+	rag-init-db rag-ingest rag-query aiops-ingest aiops-demo migrate migrate-down \
+	falla-servicio recuperar-servicio falla-disco recuperar-disco falla-pod recuperar-pod \
+	falla-cola falla-certificado
 
 build:
 	$(COMPOSE) build
@@ -67,3 +69,30 @@ migrate:
 
 migrate-down:
 	$(RUN) uv run alembic downgrade base
+
+# Laboratorio de la Fase 3 (ver k8s-lab/README.md y docs/plan-aiops.md). Requiere
+# `docker compose --profile observability up -d` (y el cluster k3d para pod-*).
+# Cada falla tiene su recuperacion: make falla-<tipo> / make recuperar-<tipo>.
+falla-servicio:
+	sh scripts/fallas/servicio_detenido.sh
+
+recuperar-servicio:
+	sh scripts/fallas/recuperar_servicio.sh
+
+falla-disco:
+	sh scripts/fallas/disco_lleno.sh
+
+recuperar-disco:
+	sh scripts/fallas/recuperar_disco.sh
+
+falla-pod:
+	sh scripts/fallas/pod_fallido.sh
+
+recuperar-pod:
+	sh scripts/fallas/recuperar_pod.sh
+
+falla-cola:
+	sh scripts/fallas/cola_detenida.sh
+
+falla-certificado:
+	sh scripts/fallas/certificado_por_vencer.sh

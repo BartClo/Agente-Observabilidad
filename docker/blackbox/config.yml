@@ -1,0 +1,10 @@
+# Modulo para sondear el certificado TLS de "gateway" (escenario
+# certificado_por_vencer). insecure_skip_verify porque el cert es autofirmado
+# (ver docker/nginx/certs/): en un entorno real se valida contra una CA.
+modules:
+  http_2xx:
+    prober: http
+    timeout: 5s
+    http:
+      tls_config:
+        insecure_skip_verify: true

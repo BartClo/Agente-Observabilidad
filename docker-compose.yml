@@ -180,6 +180,39 @@ services:
       retries: 20
     profiles: ["observability"]
 
+  # Escenario `disco_lleno`: node_exporter vigilando un volumen tmpfs de tamano fijo
+  # (50MB, ver volume billing_disk abajo) -- real pero acotado, sin arriesgar el
+  # disco del host. `make falla-disco` lo llena de verdad via disco-billing-tools
+  # (mismo volumen compartido).
+  node-exporter-billing:
+    image: prom/node-exporter:v1.8.2
+    volumes:
+      - billing_disk:/data
+    profiles: ["observability"]
+
+  disco-billing-tools:
+    image: alpine:3.20
+    volumes:
+      - billing_disk:/data
+    command: ["sleep", "infinity"]
+    profiles: ["observability"]
+
+  # Escenario `certificado_por_vencer`: nginx con un certificado autofirmado que
+  # vence pronto (docker/nginx/certs/, ver el README del laboratorio para
+  # regenerarlo) y blackbox_exporter sondeandolo via HTTPS.
+  gateway:
+    image: nginx:1.27-alpine
+    volumes:
+      - ./docker/nginx/gateway.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./docker/nginx/certs:/etc/nginx/certs:ro
+    profiles: ["observability"]
+
+  blackbox-exporter:
+    image: prom/blackbox-exporter:v0.25.0
+    volumes:
+      - ./docker/blackbox/config.yml:/etc/blackbox_exporter/config.yml:ro
+    profiles: ["observability"]
+
   # API real (app/api.py, Fase 2) para que el webhook de Grafana tenga un destino.
   # Distinto del servicio `app` (ese es la consola interactiva de make shell/run).
   api:
@@ -225,3 +258,10 @@ volumes:
   qdrant_data:
   garage_data:
   grafana_data:
+  # tmpfs de tamano fijo (50MB): se puede llenar de verdad para probar
+  # disco_lleno sin arriesgar el disco real del host.
+  billing_disk:
+    driver_opts:
+      type: tmpfs
+      device: tmpfs
+      o: "size=50m"

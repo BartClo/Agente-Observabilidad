@@ -138,39 +138,53 @@ errores, coverage `domain/` 99.40%.
 
 **Criterio de cierre:** un `curl` con un payload de Grafana termina en un incidente resuelto en el entorno simulado.
 
-## Fase 3: Laboratorio de observabilidad real — ✅ hecho (parcial) 2026-10-05
-- [x] Servicios: **Prometheus** (`v3.0.1`) y **Grafana propio** (`11.4.0`, provisionado
-      como código en `docker/grafana/provisioning/`). Loki/Promtail/node_exporter
-      quedaron fuera (no eran necesarios para probar el pipeline de alertas).
-      Commit `3cd3eee`.
-- [x] Workloads de prueba reales: `checkout` (nginx, para `servicio_detenido`,
-      parado/levantado de verdad), **RabbitMQ** con el plugin `rabbitmq_prometheus`
-      (métrica nativa, sin exporter aparte) y el Deployment `api` en k3d (para
-      `pod_fallido`, métrica `kube_pod_status_ready` verificada). `disco_lleno` y
-      `certificado_por_vencer` quedaron sin workload real (ver pendientes).
-- [x] Reglas de alerta de Grafana provisionadas como código: `ServiceDown`,
-      `PodFailed`, `QueueStalled` (con los `alertname`/etiquetas del catálogo).
-      `DiskUsageHigh` y `CertExpiringSoon` quedaron sin reglas (dependen de los
-      workloads pendientes). Commit `3cd3eee`.
-- [x] Contact point webhook hacia `POST /webhooks/grafana`, con `AIOPS_API_TOKEN`.
-- [x] Clúster **k3d** (`aiops-lab`, 1 server + 1 agent) con **kube-state-metrics**
-      (manifiestos oficiales v2.13.0), expuesto al host vía NodePort. Ver
-      `k8s-lab/README.md` para reproducirlo (incluye el workaround de
-      `kubectl`+`host.docker.internal` en Windows).
-- [ ] Inyectores de fallos como script (`make falla-<tipo>`): por ahora se probó
-      parando el contenedor a mano (`docker compose stop checkout`), no hay script.
-- [ ] Ajustar `CONSULTAS_POR_DEFECTO` a disco/certificados reales: sin workload para
-      esas 2 categorías, las queries existentes (ya corregidas en la Fase 0.5 para usar
-      `AIOPS_SERVICE_LABEL`) no se verificaron contra datos reales.
+## Fase 3: Laboratorio de observabilidad real — ✅ cerrada 2026-10-05
+- [x] Servicios: **Prometheus** `v3.0.1`, **Grafana propio** `11.4.0` (provisionado como
+      código en `docker/grafana/provisioning/`), **RabbitMQ** con `rabbitmq_prometheus`,
+      **node_exporter** `v1.8.2`, **blackbox_exporter** `v0.25.0`, nginx, k3d con
+      **kube-state-metrics**. Loki/Promtail/Alloy quedaron fuera: el pipeline de alertas
+      no los necesita (las queries de métricas van por Prometheus, no por logs).
+- [x] Workloads que fallan de verdad, los 5 escenarios del catálogo:
+  - `servicio_detenido`: contenedor `checkout` (nginx), parado/levantado de verdad.
+  - `disco_lleno`: `node-exporter-billing` vigilando un **tmpfs de 50MB** (`billing_disk`),
+    llenado real con `dd` por `disco-billing-tools`. No arriesga el disco del host.
+  - `pod_fallido`: Deployment `api` en k3d, forzado a CrashLoopBackOff con `command: /bin/false`.
+  - `cola_detenida`: RabbitMQ sin consumidores (`rabbitmq_queue_consumers = 0`).
+  - `certificado_por_vencer`: nginx `gateway` con cert autofirmado de 3 días, sondeado
+    por blackbox_exporter (`probe_ssl_earliest_cert_expiry`).
+- [x] Inyectores de fallos + recuperación: `scripts/fallas/*.sh` y targets de Makefile
+      `falla-<tipo>` / `recuperar-<tipo>` (`servicio`, `disco`, `pod`, `cola`, `certificado`).
+- [x] Reglas Grafana-managed como código (`docker/grafana/provisioning/alerting/rules.yaml`):
+      `ServiceDown`, `PodFailed`, `QueueStalled`, `DiskUsageHigh` (>85%),
+      `CertExpiringSoon` (<14 días). Todas con los `alertname` del catálogo.
+- [x] Contact point webhook hacia `POST /webhooks/grafana` con `AIOPS_API_TOKEN`.
+- [x] `AIOPS_DISK_MOUNTPOINT` configurable (antes `mountpoint="/"` fijo en la query).
+- [x] Clúster k3d `aiops-lab` (1 server + 1 agent), documentado en `k8s-lab/README.md`.
 
-**Criterio de cierre:** ✅ probado en vivo, de punta a punta, contra servicios reales
-(no mocks): se paró `checkout` → Prometheus marcó `up=0` → Grafana evaluó su regla y
-entregó el webhook a la API real (200 OK) → la API lo encoló en Redis/RQ real → el
-worker lo tomó y abrió el incidente en Postgres real
-(`INC-ServiceDown:checkout:...`). Se detuvo ahí, limpio, en la llamada al LLM (sin
-`ANTHROPIC_API_KEY`) — el límite ya documentado desde la Fase 2. `pod_fallido` tiene
-la regla y la métrica verificadas por separado, pero el disparo real contra k3d no se
-ejecutó por tiempo.
+**Criterio de cierre: ✅ los 5 escenarios disparados en vivo** (no mocks), y el webhook
+entregado a la API real con 200 OK por cada uno:
+
+| Escenario | Falla inyectada | Métrica observada | Regla | Webhook |
+|---|---|---|---|---|
+| servicio_detenido | `docker compose stop checkout` | `up{job="checkout"}=0` | ServiceDown | ✅ (y el worker abrió el incidente en Postgres) |
+| disco_lleno | `dd` de 45MB al tmpfs de 50MB | `disk=90%` | DiskUsageHigh | ✅ |
+| pod_fallido | deployment `command: /bin/false` | `kube_pod_status_ready=0` | PodFailed | ✅ |
+| cola_detenida | sin consumidores | `rabbitmq_queue_consumers=0` | QueueStalled | ✅ |
+| certificado_por_vencer | cert de 3 días | `cert_days_remaining≈3` | CertExpiringSoon | ✅ |
+
+Cada falla se recupera y la regla vuelve a `inactive` (verificado con disco).
+
+**Lo que la Fase 3 NO prueba, explícito:**
+- Que el agente resuelva el incidente de punta a punta con el LLM real: el worker llega
+  hasta la llamada al LLM y falla limpio por falta de `ANTHROPIC_API_KEY` (límite de la Fase 2).
+- Escenarios sin acción automática (`certificado_por_vencer`) solo se prueban en detección.
+
+**Hallazgos del camino (documentados en los commits):**
+- `kube_pod_status_ready` no reporta `0` para un pod que no existe: `sum()` sobre serie
+  vacía da NoData, y `noDataState: OK` lo lee como sano. Por eso `pod_fallido` se simula
+  con un pod que existe pero no está ready (CrashLoop), no escalando a 0 réplicas.
+- Git Bash convierte argumentos `/path` a rutas de Windows; los scripts lo desactivan
+  con `MSYS_NO_PATHCONV=1`.
 
 ## Fase 4: Backend de acciones real (Kubernetes/k3d)
 - [ ] Implementar `BackendAcciones` en `infra/acciones_k8s.py` contra la API de
