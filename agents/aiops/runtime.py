@@ -26,7 +26,13 @@ FALLOS_DEMO = (
 _ciclo: Ciclo | None = None
 
 
-def _armar() -> Ciclo:
+def armar(*, persistencia: str | None = None) -> Ciclo:
+    """Arma un `Ciclo` nuevo. `persistencia` fuerza "memoria"/"postgres" para ESTE
+    `Ciclo` sin tocar `AIOPS_PERSISTENCIA` del entorno (que es compartido por todo el
+    proceso): lo usa `agents/aiops/worker_jobs.py`, que necesita Postgres para su
+    propio trabajo sin pisarle el entorno a quien mas corra en el mismo proceso (ver
+    docs/plan-aiops.md Fase 2/3). `get_ciclo()` sigue siendo el singleton que lee el
+    entorno; esta funcion no lo usa ni lo modifica."""
     backend_nombre = os.environ.get("AIOPS_BACKEND", "simulado")
     observabilidad: ObservabilidadPort
     backend: BackendAcciones
@@ -53,7 +59,9 @@ def _armar() -> Ciclo:
     # Default "memoria": no cambia el comportamiento de make aiops-demo/evals (que no
     # necesitan sobrevivir un reinicio). "postgres" lo activa la API de la Fase 2, que
     # si lo necesita (ver docs/plan-aiops.md Fase 1).
-    if os.environ.get("AIOPS_PERSISTENCIA", "memoria") == "postgres":
+    if persistencia is None:
+        persistencia = os.environ.get("AIOPS_PERSISTENCIA", "memoria")
+    if persistencia == "postgres":
         from infra.auditoria_postgres import crear_sink_postgres
         from infra.incidentes_postgres import RepositorioIncidentesPostgres
         from infra.kill_switch import kill_switch_postgres
@@ -73,9 +81,12 @@ def _armar() -> Ciclo:
 
 
 def get_ciclo() -> Ciclo:
+    """Singleton por proceso: el estado del incidente que el agente mantiene entre
+    llamadas a tools, armado leyendo AIOPS_* del entorno. Para un Ciclo que no
+    comparta ese singleton ni dependa del entorno ambiente, usar `armar()`."""
     global _ciclo
     if _ciclo is None:
-        _ciclo = _armar()
+        _ciclo = armar()
     return _ciclo
 
 

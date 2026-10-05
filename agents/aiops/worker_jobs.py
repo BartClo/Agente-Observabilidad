@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from agents.aiops.runtime import get_ciclo
+from agents.aiops import runtime
 from domain.aiops_core.modelos import Alerta, Severidad
 
 
@@ -30,9 +30,14 @@ def _alerta_desde_dict(d: dict[str, Any]) -> Alerta:
 
 def procesar_alerta_webhook(alerta_dict: dict[str, Any], es_firing: bool) -> str:
     """Punto de entrada del job de RQ. `alerta_dict` es `dataclasses.asdict(alerta)`
-    (ver app/api.py), `es_firing` viene de `alerta_desde_grafana()`."""
+    (ver app/api.py), `es_firing` viene de `alerta_desde_grafana()`.
+
+    Arma su propio Ciclo con `persistencia="postgres"` explicito (no usa
+    `runtime.get_ciclo()`, el singleton que lee `AIOPS_PERSISTENCIA` del entorno):
+    este job necesita Postgres siempre, sin depender de -- ni pisarle el entorno a --
+    cualquier otro codigo que corra en el mismo proceso (demo, evals, tests)."""
     alerta = _alerta_desde_dict(alerta_dict)
-    ciclo = get_ciclo()
+    ciclo = runtime.armar(persistencia="postgres")
     if not es_firing:
         ciclo.notificar_resuelta_en_origen(alerta)
         return f"{alerta.id}: resuelta en origen, auditada (sin cerrar)"
