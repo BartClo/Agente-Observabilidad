@@ -32,32 +32,34 @@ se monta `docker.sock`.
 
 **Criterio de cierre:** demo con LLM real que termine sin errores (pendiente de claves).
 
-## Fase 0.5: Correcciones antes de persistir estado
-Bugs detectados por análisis de código, a corregir antes de la Fase 1 para no construir
-persistencia sobre datos ya torcidos.
-- [ ] `infra/observabilidad.py`: `Severidad(labels["severity"])` solo reconoce valores en
-      español. Una alerta `critical`/`warning` de Grafana/Prometheus cae en `MEDIA` por
-      defecto y queda elegible para autoremediarse sola. Traducir `critical→CRITICA`,
-      `warning→MEDIA`, etc., y ante un valor desconocido tratarlo como `CRITICA` (fail-safe).
-- [ ] `domain/aiops_core/ciclo.py` (`abrir`): el id de incidente es `INC-{alerta_id}` fijo
-      por alerta+servicio. Pasar a `INC-{alerta_id}-{startsAt}` (o fingerprint del disparo),
-      de forma que un incidente ya `RESUELTO`/`ESCALADO`/`DESCARTADO` nunca se reabra: una
-      alerta recurrente crea un incidente nuevo.
-- [ ] Aprobación humana (nivel 2): hoy solo la frena `interrupt_on` de deepagents, sin
-      registro en el dominio. Agregar `Ciclo.aprobar(incidente_id, usuario)` /
-      `Ciclo.rechazar(...)` que registren en `Auditoria` quién, cuándo y el veredicto;
-      `ejecutar_remediacion_con_aprobacion` debe verificar esa aprobación contra el dominio,
-      no confiar solo en que el framework haya pausado el grafo.
-- [ ] `infra/observabilidad.py` (`CONSULTAS_POR_DEFECTO`): las queries PromQL usan
-      `job="{s}"` fijo e ignoran `AIOPS_SERVICE_LABEL`/`etiqueta_servicio`. Usar la etiqueta
-      configurada también en las queries, no solo en `alertas_activas()`/`logs()`.
-- [ ] `domain/aiops_core/modelos.py` (`Alerta`) no guarda cuándo se disparó la alerta;
-      `metricas.mttr()` mide desde `Incidente.abierto_en` (cuando el agente la procesa), no
-      desde el disparo real. Agregar `Alerta.disparada_en` (desde `startsAt` del payload de
-      Grafana) y medir MTTR desde ahí, como exige la Fase 7.
+## Fase 0.5: Correcciones antes de persistir estado — ✅ hecho 2026-10-05
+Bugs detectados por análisis de código, corregidos antes de la Fase 1 para no construir
+persistencia sobre datos ya torcidos. TDD en los 5 (test que falla por el bug → fix →
+verde), con lint/mypy/tests/coverage corridos en el contenedor después de cada uno.
+- [x] `infra/observabilidad.py`: `Severidad(labels["severity"])` solo reconocía valores en
+      español; una alerta `critical` caía en `MEDIA`. Ahora hay un diccionario de alias
+      (`_SEVERIDAD_ALIAS`) que traduce inglés/español, y un valor desconocido se trata como
+      `CRITICA` (fail-safe), nunca `MEDIA`. Commit `13919ec`.
+- [x] `domain/aiops_core/ciclo.py` (`abrir`): si el último incidente de una alerta ya
+      quedó en un estado terminal (`RESUELTO`/`ESCALADO`/`DESCARTADO`), un `alerta_id`
+      recurrente crea un incidente nuevo (`INC-{alerta_id}-{n}`) en vez de reabrir el
+      viejo. Además, `infra/observabilidad.py` ahora usa `activeAt`/`startsAt` de
+      Prometheus para que disparos repetidos de la misma alerta+servicio ya lleguen con
+      id distinto. Commit `3a38a84`.
+- [x] Aprobación humana (nivel 2): `Ciclo.aprobar(incidente_id, usuario)` /
+      `Ciclo.rechazar(incidente_id, usuario, motivo)` registran en `Auditoria` quién,
+      cuándo y el veredicto. `ejecutar_remediacion(aprobada=True)` ya no confía en el bool
+      del llamador: exige una `Aprobacion` registrada en el dominio para ESE incidente, o
+      lanza `ErrorCiclo`. Commit `38d6f5f`.
+- [x] `infra/observabilidad.py` (`CONSULTAS_POR_DEFECTO`): las queries PromQL usaban
+      `job="{s}"` fijo. Ahora usan `{l}` = la misma etiqueta configurada
+      (`AIOPS_SERVICE_LABEL`) que ya usan `alertas_activas()`/`logs()`. Commit `13919ec`.
+- [x] `domain/aiops_core/modelos.py`: `Alerta.disparada_en` (epoch, opcional) desde
+      `activeAt`/`startsAt` del adaptador real. `metricas.mttr()` mide desde ahí cuando
+      está disponible, con fallback a `abierto_en` para el banco simulado. Commit `3a38a84`.
 
-**Criterio de cierre:** tests de `domain/aiops_core/test_aiops.py` y
-`tests/test_infra_observabilidad.py` actualizados y en verde cubriendo estos 4 casos.
+**Criterio de cierre:** ✅ 95 tests en verde (lint/mypy/tests/coverage con exit 0 cada
+uno), coverage `domain/` en 99.37%.
 
 ## Fase 1: Estado persistente
 Hoy el estado del `Ciclo` vive en memoria del proceso y se pierde al reiniciar.
