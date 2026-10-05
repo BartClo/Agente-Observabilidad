@@ -55,6 +55,53 @@ def test_alertas_solo_firing_y_severidad_tolerante() -> None:
     assert alertas[1].severidad is Severidad.MEDIA
 
 
+def test_severidad_en_ingles_de_grafana_prometheus_se_traduce() -> None:
+    """Grafana/Prometheus usan severity en ingles (critical/warning/info), no en
+    espanol. Antes caian todas en MEDIA por defecto: una alerta `critical` quedaba
+    elegible para autoremediarse sola. Ver docs/plan-aiops.md Fase 0.5."""
+    obs = Falso(
+        {
+            "/api/v1/alerts": {
+                "data": {
+                    "alerts": [
+                        {"state": "firing", "labels": {"alertname": "A", "severity": "critical"}},
+                        {"state": "firing", "labels": {"alertname": "B", "severity": "warning"}},
+                        {"state": "firing", "labels": {"alertname": "C", "severity": "info"}},
+                        {"state": "firing", "labels": {"alertname": "D", "severity": "high"}},
+                        {"state": "firing", "labels": {"alertname": "E", "severity": "low"}},
+                    ]
+                }
+            }
+        }
+    )
+    severidades = {a.nombre: a.severidad for a in obs.alertas_activas()}
+    assert severidades["A"] is Severidad.CRITICA
+    assert severidades["B"] is Severidad.MEDIA
+    assert severidades["C"] is Severidad.BAJA
+    assert severidades["D"] is Severidad.ALTA
+    assert severidades["E"] is Severidad.BAJA
+
+
+def test_severidad_desconocida_es_fail_safe_critica() -> None:
+    """Un valor de severity no reconocido no debe quedar elegible para autoremediar:
+    se trata como critica (escala en vez de ejecutar), no como media."""
+    obs = Falso(
+        {
+            "/api/v1/alerts": {
+                "data": {
+                    "alerts": [
+                        {"state": "firing", "labels": {"alertname": "Z", "severity": "rara"}},
+                        {"state": "firing", "labels": {"alertname": "W"}},
+                    ]
+                }
+            }
+        }
+    )
+    severidades = {a.nombre: a.severidad for a in obs.alertas_activas()}
+    assert severidades["Z"] is Severidad.CRITICA
+    assert severidades["W"] is Severidad.CRITICA
+
+
 def test_metrica_y_sin_datos() -> None:
     obs = Falso({"/api/v1/query": {"data": {"result": [{"value": [0, "0"]}]}}})
     assert obs.metrica("checkout", "up") == 0.0
@@ -63,6 +110,21 @@ def test_metrica_y_sin_datos() -> None:
     assert Falso({}).metrica("checkout", "up") is None
     with pytest.raises(AccionNoPermitida):
         obs.metrica('x"}) or vector(1', "up")
+
+
+def test_metrica_usa_la_etiqueta_de_servicio_configurada() -> None:
+    """AIOPS_SERVICE_LABEL debia usarse tambien en las queries de metrica(), no solo
+    en alertas_activas()/logs(): antes quedaba fijo en job=. Ver plan Fase 0.5."""
+    import urllib.parse
+
+    obs = Falso(
+        {"/api/v1/query": {"data": {"result": [{"value": [0, "1"]}]}}},
+        etiqueta_servicio="mi_etiqueta",
+    )
+    obs.metrica("checkout", "up")
+    query = urllib.parse.parse_qs(urllib.parse.urlsplit(obs.urls[-1]).query)["query"][0]
+    assert 'mi_etiqueta="checkout"' in query
+    assert "job=" not in query
 
 
 def test_logs() -> None:
