@@ -26,6 +26,13 @@ dependencies = [
     # Fase 1/2). Pin exacto confirmado en PyPI el 2026-10-05 (ver docs/open-questions.md)
     # y re-confirmado al instalar: resuelve sin conflictos con deepagents==0.7.19.
     "langgraph-checkpoint-postgres==3.1.2",
+    # API HTTP del agente aiops (Fase 2, ver docs/plan-aiops.md): webhook de Grafana,
+    # incidentes, aprobacion, kill switch, metricas. httpx ya lo trae openai/anthropic
+    # como dependencia transitiva; se declara explicito porque TestClient de FastAPI
+    # lo usa directo.
+    "fastapi>=0.142.2",
+    "uvicorn>=0.54.0",
+    "httpx>=0.28.1",
 ]
 
 [dependency-groups]

@@ -295,6 +295,40 @@ def test_politica_exige_diagnostico_previo() -> None:
     assert "diagnostico" in ciclo.ejecutar_remediacion(inc_id, aprobada=False).mensaje
 
 
+def test_abrir_desde_alerta_no_consulta_alertas_activas() -> None:
+    """El webhook de Grafana (push) entrega la Alerta completa; a diferencia de
+    `abrir()` (pull), no hay que buscarla en alertas_activas(). Mismo invariante de
+    no reabrir un incidente terminal (ver test_alerta_recurrente_no_reabre_incidente_terminal)."""
+    env = EntornoSimulado()
+    ciclo = Ciclo(env, env, Politica(nivel=NivelAutonomia.AUTONOMO_BAJO_RIESGO), Auditoria())
+    alerta = Alerta("W1", "ServiceDown", "checkout", "staging", Severidad.MEDIA, "caido")
+
+    primero = ciclo.abrir_desde_alerta(alerta)
+    assert primero.id == "INC-W1"
+    assert ciclo.abrir_desde_alerta(alerta) is primero  # en curso: no duplica
+    assert env.alertas_activas() == []  # nunca se registro en el pull: no hace falta
+
+    ciclo.incidente(primero.id).anomalia_confirmada = False
+    ciclo.descartar(primero.id)
+    segundo = ciclo.abrir_desde_alerta(alerta)
+    assert segundo.id != primero.id  # terminal: no se reabre
+
+
+def test_notificar_resuelta_en_origen_audita_sin_cerrar() -> None:
+    """status=resolved del webhook audita, pero no fuerza el cierre (decision
+    Fase 2): solo el agente cierra, y solo tras verificar."""
+    env = EntornoSimulado()
+    ciclo = Ciclo(env, env, Politica(nivel=NivelAutonomia.AUTONOMO_BAJO_RIESGO), Auditoria())
+    alerta = Alerta("W2", "ServiceDown", "checkout", "staging", Severidad.MEDIA, "caido")
+
+    ciclo.notificar_resuelta_en_origen(alerta)  # sin incidente abierto: no-op
+    inc = ciclo.abrir_desde_alerta(alerta)
+    ciclo.notificar_resuelta_en_origen(alerta)
+    assert ciclo.incidente(inc.id).estado is Estado.ABIERTO  # no se cerro solo
+    tipos = {e.tipo for e in ciclo.auditoria.de_incidente(inc.id)}
+    assert "alerta_resuelta_en_origen" in tipos
+
+
 def test_alerta_recurrente_no_reabre_incidente_terminal() -> None:
     """Si el ultimo incidente de una alerta ya quedo resuelto/escalado/descartado,
     abrir() de nuevo con el mismo alerta_id crea un incidente nuevo en vez de

@@ -14,43 +14,11 @@ import time
 import urllib.parse
 import urllib.request
 from collections.abc import Mapping
-from datetime import datetime
 from typing import Any
 
 from domain.aiops_core.acciones import validar_servicio
-from domain.aiops_core.modelos import Alerta, Severidad
-
-# Grafana/Prometheus usan severity en ingles; el catalogo interno esta en espanol.
-# Un valor no reconocido se trata como CRITICA (fail-safe: fuera del alcance
-# autonomo, nunca se autoremedia por error). Ver docs/plan-aiops.md Fase 0.5.
-_SEVERIDAD_ALIAS: dict[str, Severidad] = {
-    "critica": Severidad.CRITICA,
-    "critical": Severidad.CRITICA,
-    "alta": Severidad.ALTA,
-    "high": Severidad.ALTA,
-    "media": Severidad.MEDIA,
-    "medium": Severidad.MEDIA,
-    "warning": Severidad.MEDIA,
-    "baja": Severidad.BAJA,
-    "low": Severidad.BAJA,
-    "info": Severidad.BAJA,
-}
-
-
-def _severidad_desde_label(valor: str | None) -> Severidad:
-    return _SEVERIDAD_ALIAS.get((valor or "").strip().lower(), Severidad.CRITICA)
-
-
-def _parse_activo_en(valor: str | None) -> float | None:
-    """Parsea `activeAt`/`startsAt` (ISO 8601 de Prometheus/Alertmanager) a epoch
-    seconds. None si falta o no se puede parsear (el valor sigue siendo opcional:
-    ver `Alerta.disparada_en`)."""
-    if not valor:
-        return None
-    try:
-        return datetime.fromisoformat(valor.replace("Z", "+00:00")).timestamp()
-    except ValueError:
-        return None
+from domain.aiops_core.modelos import Alerta
+from infra.alertas_comun import parse_timestamp_iso, severidad_desde_label
 
 # metrica del catalogo -> PromQL. `{s}` se reemplaza por el servicio ya validado;
 # `{l}` por la etiqueta que identifica el servicio (AIOPS_SERVICE_LABEL, "job" por
@@ -103,9 +71,9 @@ class PrometheusLoki:
             labels = a.get("labels", {})
             servicio = labels.get(self._etiqueta) or labels.get("job", "desconocido")
             nombre = labels.get("alertname", "desconocida")
-            severidad = _severidad_desde_label(labels.get("severity"))
+            severidad = severidad_desde_label(labels.get("severity"))
             activo_en = a.get("activeAt") or a.get("startsAt")
-            disparada_en = _parse_activo_en(activo_en)
+            disparada_en = parse_timestamp_iso(activo_en)
             # El activeAt distingue disparos repetidos de la misma alerta+servicio:
             # sin esto, un ServiceDown que se resuelve y vuelve a dispararse llegaria
             # siempre con el mismo id y Ciclo.abrir() lo trataria como el mismo

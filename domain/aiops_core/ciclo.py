@@ -15,7 +15,14 @@ from dataclasses import dataclass
 from domain.aiops_core.acciones import AccionNoPermitida, BackendAcciones, ejecutar_accion
 from domain.aiops_core.auditoria import Auditoria
 from domain.aiops_core.catalogo import CATALOGO, CategoriaL1, categoria_para_alerta
-from domain.aiops_core.modelos import AccionEjecutada, Aprobacion, Estado, Incidente, Severidad
+from domain.aiops_core.modelos import (
+    AccionEjecutada,
+    Alerta,
+    Aprobacion,
+    Estado,
+    Incidente,
+    Severidad,
+)
 from domain.aiops_core.observabilidad import ObservabilidadPort
 from domain.aiops_core.politicas import Politica, Veredicto
 from domain.aiops_core.repositorio import RepositorioIncidentes, RepositorioIncidentesMemoria
@@ -97,22 +104,42 @@ class Ciclo:
         terminal (resuelto/escalado/descartado), un disparo recurrente crea uno nuevo
         en vez de reabrir el viejo: evita que se lea como ya resuelto algo que volvio
         a fallar (ver docs/plan-aiops.md Fase 0.5)."""
-        base_id = f"INC-{alerta_id}"
-        existente = self._repo.obtener(base_id)
+        existente = self._repo.obtener(f"INC-{alerta_id}")
         if existente is not None and existente.estado not in self._ESTADOS_TERMINALES:
             return existente
         alerta = next((a for a in self._obs.alertas_activas() if a.id == alerta_id), None)
         if alerta is None:
             raise ErrorCiclo(f"Alerta {alerta_id!r} no esta activa")
+        return self._abrir_o_reusar(alerta, origen="pull")
+
+    def abrir_desde_alerta(self, alerta: Alerta) -> Incidente:
+        """Como `abrir`, pero para una alerta que llega por push (webhook de Grafana,
+        Fase 2) en vez de por pull (`alertas_activas()`): la alerta ya viene completa,
+        no hay que buscarla. Mismo invariante: no reabre un incidente terminal."""
+        existente = self._repo.obtener(f"INC-{alerta.id}")
+        if existente is not None and existente.estado not in self._ESTADOS_TERMINALES:
+            return existente
+        return self._abrir_o_reusar(alerta, origen="webhook")
+
+    def notificar_resuelta_en_origen(self, alerta: Alerta) -> None:
+        """El webhook de Grafana manda `status: resolved` para esta alerta. Se audita
+        como evidencia, pero no cierra nada: solo el agente cierra, y solo tras
+        `verificar`. Sin incidente abierto para esta alerta, no hace nada."""
+        inc = self._repo.obtener(f"INC-{alerta.id}")
+        if inc is not None and inc.estado not in self._ESTADOS_TERMINALES:
+            self.auditoria.registrar(inc.id, "alerta_resuelta_en_origen")
+
+    def _abrir_o_reusar(self, alerta: Alerta, *, origen: str) -> Incidente:
+        base_id = f"INC-{alerta.id}"
         incidente_id = base_id
-        if existente is not None:
+        if self._repo.obtener(base_id) is not None:
             n = 2
             while self._repo.obtener(f"{base_id}-{n}") is not None:
                 n += 1
             incidente_id = f"{base_id}-{n}"
         inc = Incidente(id=incidente_id, alerta=alerta, abierto_en=self._reloj())
         self._guardar(inc)
-        self.auditoria.registrar(incidente_id, "abierto", alerta=alerta.nombre)
+        self.auditoria.registrar(incidente_id, "abierto", alerta=alerta.nombre, origen=origen)
         return inc
 
     def confirmar_anomalia(self, incidente_id: str) -> tuple[bool, str]:
