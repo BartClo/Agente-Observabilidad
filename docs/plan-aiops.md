@@ -61,23 +61,36 @@ verde), con lint/mypy/tests/coverage corridos en el contenedor después de cada 
 **Criterio de cierre:** ✅ 95 tests en verde (lint/mypy/tests/coverage con exit 0 cada
 uno), coverage `domain/` en 99.37%.
 
-## Fase 1: Estado persistente
+## Fase 1: Estado persistente — ✅ hecho 2026-10-05
 Hoy el estado del `Ciclo` vive en memoria del proceso y se pierde al reiniciar.
-- [ ] Tablas en Postgres para `incidentes`, `acciones`, `eventos_auditoria`,
-      `aprobaciones` (quién/cuándo/veredicto) y `kill_switch` (fila única + auditoría).
-- [ ] Migraciones con **Alembic** (nueva dependencia): versiona el esquema hacia adelante
-      y permite migrar volúmenes ya creados, a diferencia de los scripts de un solo uso en
-      `docker/postgres-init/`.
-- [ ] Puerto `RepositorioIncidentes` en `domain/aiops_core/` con una implementación en
-      memoria (tests) y otra en Postgres (`infra/`).
-- [ ] `Auditoria` también persiste en Postgres. El JSONL queda como opción.
-- [ ] Checkpointer de LangGraph sobre Postgres: `langgraph-checkpoint-postgres==3.1.2`
-      (confirmado en PyPI el 2026-10-05; exige `langgraph-checkpoint>=4.1.0,<5.0.0`, que
-      `deepagents==0.7.19` resuelve de forma transitiva). Fijar con `uv add` dentro del
-      contenedor y commitear el `uv.lock` resultante. Necesario para reanudar las pausas
-      de aprobación.
+- [x] Tablas en Postgres: `aiops_incidentes` (JSONB + columnas indexadas
+      id/estado/servicio), `aiops_eventos_auditoria`, `aiops_kill_switch` (fila única).
+      Las acciones y la aprobación quedan dentro del JSONB del incidente, no en tablas
+      aparte (decisión tomada en el camino, ver resumen al final de la conversación).
+      Commit `6f657f4`.
+- [x] Migraciones con **Alembic** (`alembic==1.20.0`, pin real de `uv add`). `make migrate` /
+      `make migrate-down`. Verificado upgrade→downgrade→upgrade contra Postgres real.
+      Commit `6f657f4`.
+- [x] Puerto `RepositorioIncidentes` en `domain/aiops_core/repositorio.py`:
+      `RepositorioIncidentesMemoria` (default de `Ciclo`, mismo comportamiento que
+      antes) y `RepositorioIncidentesPostgres` en `infra/incidentes_postgres.py`.
+      Commits `4bef230`, `ce73431`.
+- [x] `Auditoria` gana `on_evento` (callback opcional); `infra/auditoria_postgres.py`
+      la conecta a Postgres sin que `domain/` importe `infra/`. El JSONL sigue
+      disponible y es independiente. Commit `ce73431`.
+- [x] Kill switch en Postgres (`infra/kill_switch.py`), reemplaza la variable de
+      entorno/archivo para procesos que ya están corriendo. Commit `ce73431`.
+- [x] `langgraph-checkpoint-postgres==3.1.2` instalado y verificado con un `put`/`get`
+      real contra Postgres (setup de tablas + checkpoint redondo). **No** cablea
+      `create_deep_agent(checkpointer=...)` ni `Command(resume=...)`: eso necesita el
+      endpoint `/aprobar` real de la Fase 2, no solo la librería. Commit `433a99d`.
+- [x] `AIOPS_PERSISTENCIA=memoria|postgres` en `agents/aiops/runtime.py`: default
+      `memoria` (no cambia `make aiops-demo`/evals); `postgres` cablea los 3 adaptadores.
 
-**Criterio de cierre:** reiniciar `app` a mitad de un incidente y retomarlo.
+**Criterio de cierre:** ✅ probado con un `Ciclo` nuevo leyendo de Postgres lo que
+escribió otro (`tests/test_infra_incidentes_postgres.py::test_sobrevive_acciones_y_aprobacion`),
+simulando un reinicio a mitad del incidente. 104 tests en verde, mypy estricto sin
+errores, coverage `domain/` 99.40%.
 
 ## Fase 2: API HTTP (FastAPI)
 - [ ] Añadir `fastapi` y `uvicorn` y exponer `app/api.py` en el servicio `app` del compose.
