@@ -2,7 +2,7 @@ COMPOSE = docker compose
 RUN = $(COMPOSE) run --rm app
 
 .PHONY: build lock check lint format typecheck test coverage evals run shell down logs \
-	rag-init-db rag-ingest rag-query aiops-ingest aiops-demo
+	rag-init-db rag-ingest rag-query aiops-ingest aiops-demo migrate migrate-down
 
 build:
 	$(COMPOSE) build
@@ -59,3 +59,11 @@ aiops-ingest:
 AIOPS_DEMO_LEVEL ?= 3
 aiops-demo:
 	$(COMPOSE) run --rm -e AIOPS_AUTONOMY_LEVEL=$(AIOPS_DEMO_LEVEL) app uv run python -m agents.aiops.demo
+
+# Esquema de persistencia de aiops (ver docs/plan-aiops.md Fase 1). `migrate-down`
+# revierte todo (solo para desarrollo: borra las tablas aiops_*).
+migrate:
+	$(RUN) uv run alembic upgrade head
+
+migrate-down:
+	$(RUN) uv run alembic downgrade base
