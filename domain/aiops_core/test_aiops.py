@@ -251,6 +251,48 @@ def test_politica_exige_diagnostico_previo() -> None:
     assert "diagnostico" in ciclo.ejecutar_remediacion(inc_id, aprobada=False).mensaje
 
 
+def test_alerta_recurrente_no_reabre_incidente_terminal() -> None:
+    """Si el ultimo incidente de una alerta ya quedo resuelto/escalado/descartado,
+    abrir() de nuevo con el mismo alerta_id crea un incidente nuevo en vez de
+    devolver el viejo (ya cerrado). Mientras el incidente sigue en curso, abrir()
+    sigue devolviendo el mismo (sin duplicar). Un adaptador real evita en general que
+    esto pase dando un id distinto por disparo (ver infra/observabilidad.py), pero
+    Ciclo.abrir() tiene que ser seguro igual si dos disparos comparten alerta_id.
+    Ver docs/plan-aiops.md Fase 0.5."""
+
+    class ObsSiempreActiva(EntornoSimulado):
+        """A diferencia del banco simulado real, la alerta nunca desaparece de
+        alertas_activas() aunque la metrica se recupere: simula un adaptador que
+        reutiliza el mismo alerta_id en cada disparo."""
+
+        def alertas_activas(self) -> list[Alerta]:
+            return list(self._alertas)
+
+    env = ObsSiempreActiva()
+    a = env.inyectar_fallo("checkout", "servicio_detenido")
+    ciclo = Ciclo(env, env, Politica(nivel=NivelAutonomia.AUTONOMO_CON_ROLLBACK), Auditoria())
+
+    primero = ciclo.abrir(a.id)
+    assert ciclo.abrir(a.id) is primero  # en curso: mismo objeto, no duplica
+
+    inc_id = preparar(ciclo, a.id)
+    assert inc_id == primero.id
+    ciclo.ejecutar_remediacion(inc_id, aprobada=False)
+    ciclo.verificar(inc_id)
+    ciclo.cerrar(inc_id)
+    assert ciclo.incidente(inc_id).estado is Estado.RESUELTO
+
+    segundo = ciclo.abrir(a.id)  # la alerta "vuelve a dispararse" (mismo alerta_id)
+    assert segundo.id != primero.id
+    assert segundo.estado is Estado.ABIERTO
+    assert ciclo.incidente(primero.id).estado is Estado.RESUELTO  # el viejo no se toco
+
+    tercero_descartado = ciclo.descartar(segundo.id)
+    assert tercero_descartado.estado is Estado.DESCARTADO
+    tercero = ciclo.abrir(a.id)
+    assert tercero.id not in (primero.id, segundo.id)
+
+
 def test_alertas_e_incidentes_inexistentes() -> None:
     ciclo, _, _ = armar()
     with pytest.raises(ErrorCiclo, match="no esta activa"):
@@ -390,6 +432,28 @@ def test_metricas_tra_mttr_rollback() -> None:
     assert metricas.mttr(incs) > 0
     assert metricas.reduccion_mttr(100, 70) == pytest.approx(30)
     assert metricas.tasa_rollback(incs) == pytest.approx(50)
+
+
+def test_mttr_usa_disparada_en_cuando_esta_disponible() -> None:
+    """El MTTR de la tesis se mide desde el disparo real de la alerta, no desde que
+    el agente la abrio. Si el adaptador no informa disparada_en (banco simulado),
+    cae a abierto_en como antes."""
+    reloj = Reloj()
+    env = EntornoSimulado()
+    politica = Politica(nivel=NivelAutonomia.AUTONOMO_CON_ROLLBACK)
+    ciclo = Ciclo(env, env, politica, Auditoria(), reloj)
+    alerta = env.inyectar_fallo("checkout", "servicio_detenido")
+    alerta_con_disparo = Alerta(
+        alerta.id, alerta.nombre, alerta.servicio, alerta.entorno, alerta.severidad,
+        alerta.resumen, disparada_en=0.0,
+    )
+    env._alertas[0] = alerta_con_disparo
+    inc_id = preparar(ciclo, alerta.id)
+    ciclo.ejecutar_remediacion(inc_id, aprobada=False)
+    ciclo.verificar(inc_id)
+    inc = ciclo.cerrar(inc_id)
+    assert inc.alerta.disparada_en == 0.0
+    assert metricas.mttr([inc]) == pytest.approx(inc.cerrado_en)  # desde 0.0, no abierto_en
 
 
 def test_metricas_casos_borde() -> None:

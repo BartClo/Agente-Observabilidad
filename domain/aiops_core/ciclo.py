@@ -78,13 +78,27 @@ class Ciclo:
 
     # --- ciclo --------------------------------------------------------------------
 
+    _ESTADOS_TERMINALES = (Estado.RESUELTO, Estado.ESCALADO, Estado.DESCARTADO)
+
     def abrir(self, alerta_id: str) -> Incidente:
-        incidente_id = f"INC-{alerta_id}"
-        if incidente_id in self._incidentes:
-            return self._incidentes[incidente_id]
+        """Abre el incidente de una alerta activa, o recupera el que ya esta en curso
+        para esa alerta. Si el ultimo incidente de esta alerta ya quedo en un estado
+        terminal (resuelto/escalado/descartado), un disparo recurrente crea uno nuevo
+        en vez de reabrir el viejo: evita que se lea como ya resuelto algo que volvio
+        a fallar (ver docs/plan-aiops.md Fase 0.5)."""
+        base_id = f"INC-{alerta_id}"
+        existente = self._incidentes.get(base_id)
+        if existente is not None and existente.estado not in self._ESTADOS_TERMINALES:
+            return existente
         alerta = next((a for a in self._obs.alertas_activas() if a.id == alerta_id), None)
         if alerta is None:
             raise ErrorCiclo(f"Alerta {alerta_id!r} no esta activa")
+        incidente_id = base_id
+        if existente is not None:
+            n = 2
+            while f"{base_id}-{n}" in self._incidentes:
+                n += 1
+            incidente_id = f"{base_id}-{n}"
         inc = Incidente(id=incidente_id, alerta=alerta, abierto_en=self._reloj())
         self._incidentes[incidente_id] = inc
         self.auditoria.registrar(incidente_id, "abierto", alerta=alerta.nombre)

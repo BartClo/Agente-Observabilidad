@@ -102,6 +102,37 @@ def test_severidad_desconocida_es_fail_safe_critica() -> None:
     assert severidades["W"] is Severidad.CRITICA
 
 
+def test_activeat_desambigua_disparos_repetidos_y_llena_disparada_en() -> None:
+    """Dos disparos de la misma alerta+servicio (ServiceDown en checkout, resuelto y
+    vuelto a fallar) deben dar ids distintos, o Ciclo.abrir() los trataria como el
+    mismo incidente ya cerrado. Tambien debe quedar Alerta.disparada_en para el MTTR
+    real (Fase 0.5 del plan)."""
+    obs = Falso(
+        {
+            "/api/v1/alerts": {
+                "data": {
+                    "alerts": [
+                        {
+                            "state": "firing",
+                            "activeAt": "2026-10-05T10:00:00Z",
+                            "labels": {"alertname": "ServiceDown", "service": "checkout"},
+                        },
+                        {
+                            "state": "firing",
+                            "activeAt": "2026-10-05T11:30:00Z",
+                            "labels": {"alertname": "ServiceDown", "service": "checkout"},
+                        },
+                    ]
+                }
+            }
+        }
+    )
+    alertas = obs.alertas_activas()
+    assert alertas[0].id != alertas[1].id
+    assert alertas[1].disparada_en is not None
+    assert alertas[1].disparada_en > alertas[0].disparada_en  # type: ignore[operator]
+
+
 def test_metrica_y_sin_datos() -> None:
     obs = Falso({"/api/v1/query": {"data": {"result": [{"value": [0, "0"]}]}}})
     assert obs.metrica("checkout", "up") == 0.0

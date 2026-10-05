@@ -42,6 +42,10 @@ class Alerta:
     entorno: str
     severidad: Severidad
     resumen: str
+    # Instante real del disparo (epoch seconds; `startsAt`/`activeAt` del adaptador).
+    # None en el banco simulado. El MTTR de la tesis se mide desde aca, no desde
+    # que el agente abre el incidente (ver domain/aiops_core/metricas.py).
+    disparada_en: float | None = None
 
 
 @dataclass(frozen=True)

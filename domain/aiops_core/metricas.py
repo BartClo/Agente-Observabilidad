@@ -20,9 +20,15 @@ def tasa_resolucion_autonoma(incidentes: Sequence[Incidente]) -> float:
 
 
 def mttr(incidentes: Sequence[Incidente]) -> float:
-    """Segundos promedio de `abierto_en` a `cerrado_en` en incidentes resueltos."""
+    """Segundos promedio desde el disparo de la alerta (`Alerta.disparada_en`, o
+    `abierto_en` si el adaptador no lo informa) hasta `cerrado_en`, en incidentes
+    resueltos. La tesis exige medir desde el disparo, no desde que el agente abre
+    el incidente: un agente lento en recoger la alerta no debe parecer mas rapido."""
     duraciones = [
-        i.cerrado_en - i.abierto_en for i in incidentes if i.cerrado_en is not None and i.verificado
+        i.cerrado_en
+        - (i.alerta.disparada_en if i.alerta.disparada_en is not None else i.abierto_en)
+        for i in incidentes
+        if i.cerrado_en is not None and i.verificado
     ]
     if not duraciones:
         raise ValueError("No hay incidentes resueltos: el MTTR no esta definido")

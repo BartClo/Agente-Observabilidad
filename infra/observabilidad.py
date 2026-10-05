@@ -14,6 +14,7 @@ import time
 import urllib.parse
 import urllib.request
 from collections.abc import Mapping
+from datetime import datetime
 from typing import Any
 
 from domain.aiops_core.acciones import validar_servicio
@@ -38,6 +39,18 @@ _SEVERIDAD_ALIAS: dict[str, Severidad] = {
 
 def _severidad_desde_label(valor: str | None) -> Severidad:
     return _SEVERIDAD_ALIAS.get((valor or "").strip().lower(), Severidad.CRITICA)
+
+
+def _parse_activo_en(valor: str | None) -> float | None:
+    """Parsea `activeAt`/`startsAt` (ISO 8601 de Prometheus/Alertmanager) a epoch
+    seconds. None si falta o no se puede parsear (el valor sigue siendo opcional:
+    ver `Alerta.disparada_en`)."""
+    if not valor:
+        return None
+    try:
+        return datetime.fromisoformat(valor.replace("Z", "+00:00")).timestamp()
+    except ValueError:
+        return None
 
 # metrica del catalogo -> PromQL. `{s}` se reemplaza por el servicio ya validado;
 # `{l}` por la etiqueta que identifica el servicio (AIOPS_SERVICE_LABEL, "job" por
@@ -91,14 +104,22 @@ class PrometheusLoki:
             servicio = labels.get(self._etiqueta) or labels.get("job", "desconocido")
             nombre = labels.get("alertname", "desconocida")
             severidad = _severidad_desde_label(labels.get("severity"))
+            activo_en = a.get("activeAt") or a.get("startsAt")
+            disparada_en = _parse_activo_en(activo_en)
+            # El activeAt distingue disparos repetidos de la misma alerta+servicio:
+            # sin esto, un ServiceDown que se resuelve y vuelve a dispararse llegaria
+            # siempre con el mismo id y Ciclo.abrir() lo trataria como el mismo
+            # incidente ya cerrado (ver docs/plan-aiops.md Fase 0.5).
+            sufijo = f":{activo_en}" if activo_en else ""
             alertas.append(
                 Alerta(
-                    id=f"{nombre}:{servicio}",
+                    id=f"{nombre}:{servicio}{sufijo}",
                     nombre=nombre,
                     servicio=servicio,
                     entorno=labels.get("env", labels.get("environment", "desconocido")),
                     severidad=severidad,
                     resumen=a.get("annotations", {}).get("summary", ""),
+                    disparada_en=disparada_en,
                 )
             )
         return alertas
