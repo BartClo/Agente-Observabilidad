@@ -27,6 +27,7 @@ from domain.aiops_core.auditoria import Evento
 from domain.aiops_core.ciclo import ErrorCiclo
 from domain.aiops_core.modelos import Incidente
 from infra import kill_switch
+from infra.alertas_webhook import alerta_desde_grafana
 
 app = FastAPI(title="aiops API")
 
@@ -45,6 +46,42 @@ _AUTENTICADO = [Depends(requiere_token)]
 @app.get("/salud")
 def salud() -> dict[str, str]:
     return {"estado": "ok"}
+
+
+@app.post("/webhooks/grafana", dependencies=_AUTENTICADO)
+def webhook_grafana(payload: dict[str, Any]) -> dict[str, Any]:
+    """Contact point tipo webhook de Grafana: `payload["alerts"]` trae una o varias
+    alertas (firing o resolved). Solo valida, parsea y encola -- nunca ejecuta el
+    agente inline (ver agents/aiops/worker_jobs.py, que corre en el servicio `worker`,
+    profile `redis`). Dedupe por job_id = alerta.id (que ya incluye fingerprint/startsAt,
+    distinto por cada disparo real: ver infra/alertas_webhook.py)."""
+    import dataclasses as dc
+    import re
+
+    from infra.queue import get_queue
+
+    etiqueta = os.environ.get("AIOPS_SERVICE_LABEL", "service")
+    cola = get_queue("aiops")
+    encolados: list[str] = []
+    deduplicados: list[str] = []
+    for item in payload.get("alerts", []):
+        alerta, es_firing = alerta_desde_grafana(item, etiqueta)
+        # RQ solo acepta [A-Za-z0-9_-] en job_id; alerta.id trae ":" (separador de
+        # infra/alertas_webhook.py). No afecta el dedupe: sigue siendo 1 a 1 con
+        # alerta.id, solo cambia el caracter separador.
+        job_id = "aiops-webhook-" + re.sub(r"[^A-Za-z0-9_-]", "_", alerta.id)
+        job = cola.fetch_job(job_id)
+        if job is not None and job.get_status() in ("queued", "started", "deferred", "scheduled"):
+            deduplicados.append(alerta.id)
+            continue
+        cola.enqueue(
+            "agents.aiops.worker_jobs.procesar_alerta_webhook",
+            dc.asdict(alerta),
+            es_firing,
+            job_id=job_id,
+        )
+        encolados.append(alerta.id)
+    return {"encolados": encolados, "deduplicados": deduplicados}
 
 
 def _resumen(inc: Incidente) -> dict[str, Any]:
