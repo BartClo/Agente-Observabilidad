@@ -160,6 +160,7 @@ def test_rollback_sin_accion_previa_o_sin_rollback() -> None:
 def test_niveles_bajos_no_ejecutan_ni_con_aprobacion(nivel: NivelAutonomia) -> None:
     ciclo, env, alerta_id = armar(nivel=nivel)
     inc_id = preparar(ciclo, alerta_id)
+    ciclo.aprobar(inc_id, "ana@equipo")  # incluso con aprobacion registrada, deniega
     for aprobada in (False, True):
         res = ciclo.ejecutar_remediacion(inc_id, aprobada=aprobada)
         assert res.veredicto is Veredicto.DENEGAR and not res.ejecutada
@@ -171,15 +172,57 @@ def test_nivel_2_pide_aprobacion_y_no_cuenta_como_autonomo() -> None:
     inc_id = preparar(ciclo, alerta_id)
     res = ciclo.ejecutar_remediacion(inc_id, aprobada=False)
     assert res.veredicto is Veredicto.APROBACION and env.acciones_ejecutadas == []
+    # aprobada=True sin que un humano haya aprobado en el dominio: rechazado, no ejecuta.
+    with pytest.raises(ErrorCiclo, match="aprobacion registrada"):
+        ciclo.ejecutar_remediacion(inc_id, aprobada=True)
+    assert env.acciones_ejecutadas == []
+    ciclo.aprobar(inc_id, "ana@equipo")
     assert ciclo.ejecutar_remediacion(inc_id, aprobada=True).ejecutada
     ciclo.verificar(inc_id)
     inc = ciclo.cerrar(inc_id)
     assert inc.verificado and not inc.resuelto_autonomo  # hubo intervencion humana
+    assert inc.aprobacion is not None and inc.aprobacion.usuario == "ana@equipo"
+    assert {e.tipo for e in ciclo.auditoria.de_incidente(inc_id)} >= {"aprobacion"}
+
+
+def test_rechazar_aprobacion_escala_y_no_ejecuta() -> None:
+    ciclo, env, alerta_id = armar(nivel=NivelAutonomia.CON_APROBACION)
+    inc_id = preparar(ciclo, alerta_id)
+    ciclo.ejecutar_remediacion(inc_id, aprobada=False)  # queda pendiente de aprobacion
+    paquete = ciclo.rechazar(inc_id, "ana@equipo", "no es el momento")
+    assert "ESCALADO" in paquete
+    inc = ciclo.incidente(inc_id)
+    assert inc.estado is Estado.ESCALADO
+    assert inc.aprobacion is not None and inc.aprobacion.veredicto == "rechazado"
+    assert env.acciones_ejecutadas == []
+    with pytest.raises(ErrorCiclo, match="no admite"):
+        ciclo.ejecutar_remediacion(inc_id, aprobada=True)
+
+
+def test_aprobacion_de_un_incidente_no_sirve_para_otro() -> None:
+    """Una `Aprobacion` vive en el Incidente, no es un flag global: aprobar uno no
+    deja ejecutar sin aprobacion a otro incidente distinto."""
+    ciclo, _, a1 = armar(nivel=NivelAutonomia.CON_APROBACION)
+    inc1 = preparar(ciclo, a1)
+    ciclo.ejecutar_remediacion(inc1, aprobada=False)
+    ciclo.aprobar(inc1, "ana@equipo")
+    assert ciclo.ejecutar_remediacion(inc1, aprobada=True).ejecutada
+
+    env2 = EntornoSimulado()
+    alerta2 = env2.inyectar_fallo("otro-svc", "servicio_detenido")
+    ciclo2 = Ciclo(
+        env2, env2, Politica(nivel=NivelAutonomia.CON_APROBACION), Auditoria()
+    )
+    inc2 = preparar(ciclo2, alerta2.id)
+    ciclo2.ejecutar_remediacion(inc2, aprobada=False)
+    with pytest.raises(ErrorCiclo, match="aprobacion registrada"):
+        ciclo2.ejecutar_remediacion(inc2, aprobada=True)
 
 
 def test_kill_switch_bloquea_ejecucion_pero_no_escalamiento() -> None:
     ciclo, env, alerta_id = armar(kill_switch=lambda: True)
     inc_id = preparar(ciclo, alerta_id)
+    ciclo.aprobar(inc_id, "ana@equipo")  # ni con aprobacion: el kill switch gana
     res = ciclo.ejecutar_remediacion(inc_id, aprobada=True)
     assert res.veredicto is Veredicto.DENEGAR and "kill switch" in res.mensaje
     assert env.acciones_ejecutadas == []

@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from domain.aiops_core.acciones import AccionNoPermitida, BackendAcciones, ejecutar_accion
 from domain.aiops_core.auditoria import Auditoria
 from domain.aiops_core.catalogo import CATALOGO, CategoriaL1, categoria_para_alerta
-from domain.aiops_core.modelos import AccionEjecutada, Estado, Incidente, Severidad
+from domain.aiops_core.modelos import AccionEjecutada, Aprobacion, Estado, Incidente, Severidad
 from domain.aiops_core.observabilidad import ObservabilidadPort
 from domain.aiops_core.politicas import Politica, Veredicto
 
@@ -184,6 +184,24 @@ class Ciclo:
             return self._decidir_sin_ejecutar(inc, "sin accion autorizada para esta categoria")
         return self._ejecutar(inc, categoria.accion, es_rollback=False, aprobada=aprobada)
 
+    def aprobar(self, incidente_id: str, usuario: str) -> None:
+        """Registra en el dominio que `usuario` aprobo la remediacion pendiente.
+        `ejecutar_remediacion(aprobada=True)` exige que esto se haya llamado antes:
+        no alcanza con que el framework haya pausado el grafo (ver Aprobacion)."""
+        inc = self.incidente(incidente_id)
+        inc.aprobacion = Aprobacion(usuario, self._reloj(), "aprobado")
+        self.auditoria.registrar(incidente_id, "aprobacion", usuario=usuario, veredicto="aprobado")
+
+    def rechazar(self, incidente_id: str, usuario: str, motivo: str) -> str:
+        """Registra el rechazo y escala de inmediato: un rechazo siempre termina en
+        intervencion humana, nunca reintenta la accion por su cuenta."""
+        inc = self.incidente(incidente_id)
+        inc.aprobacion = Aprobacion(usuario, self._reloj(), "rechazado")
+        self.auditoria.registrar(
+            incidente_id, "aprobacion", usuario=usuario, veredicto="rechazado", motivo=motivo
+        )
+        return self.escalar(incidente_id, f"aprobacion rechazada por {usuario}: {motivo}")
+
     def revertir(self, incidente_id: str) -> ResultadoEjecucion:
         inc = self.incidente(incidente_id)
         categoria = self._categoria(inc)
@@ -265,6 +283,11 @@ class Ciclo:
     def _ejecutar(
         self, inc: Incidente, accion: str, *, es_rollback: bool, aprobada: bool
     ) -> ResultadoEjecucion:
+        if aprobada and not (inc.aprobacion is not None and inc.aprobacion.veredicto == "aprobado"):
+            raise ErrorCiclo(
+                "aprobada=True sin una aprobacion registrada en el dominio: "
+                "llamar Ciclo.aprobar(incidente_id, usuario) antes de ejecutar"
+            )
         decision = self.politica.evaluar(
             inc, self._categoria(inc), accion, es_rollback=es_rollback, aprobada=aprobada
         )

@@ -89,7 +89,13 @@ def ejecutar_remediacion(incidente_id: str) -> str:
 @_seguro
 def ejecutar_remediacion_con_aprobacion(incidente_id: str) -> str:
     """Igual que ejecutar_remediacion, pero queda pausada hasta que un humano la apruebe.
-    Usar solo si ejecutar_remediacion respondio REQUIERE APROBACION."""
+    Usar solo si ejecutar_remediacion respondio REQUIERE APROBACION.
+
+    No alcanza con que el framework pause el grafo (`interrupt_on` en agent.yaml): el
+    dominio exige que `Ciclo.aprobar(incidente_id, usuario)` se haya llamado antes, o
+    esta tool devuelve ERROR. Esa llamada la hace el canal humano real (endpoint
+    `POST /incidentes/{id}/aprobar` de la Fase 2 de docs/plan-aiops.md, no disponible
+    todavia), nunca el propio LLM: aprobarse a si mismo no cuenta como aprobacion."""
     return get_ciclo().ejecutar_remediacion(incidente_id, aprobada=True).mensaje
 
 

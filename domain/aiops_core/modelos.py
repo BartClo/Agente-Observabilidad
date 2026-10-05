@@ -57,6 +57,17 @@ class AccionEjecutada:
     es_rollback: bool = False
 
 
+@dataclass(frozen=True)
+class Aprobacion:
+    """Registro en el dominio de una aprobacion humana (nivel 2). No alcanza con que
+    el framework pause el grafo (`interrupt_on`): la ejecucion verifica esto aca, no
+    confia solo en que alguien haya llamado la tool correcta (ver Ciclo.aprobar)."""
+
+    usuario: str
+    ts: float
+    veredicto: str  # "aprobado" | "rechazado"
+
+
 @dataclass
 class Incidente:
     id: str
@@ -74,6 +85,7 @@ class Incidente:
     intervencion_humana: bool = False
     cerrado_en: float | None = None
     motivo_escalamiento: str | None = None
+    aprobacion: Aprobacion | None = None
 
     @property
     def intentos(self) -> int:
