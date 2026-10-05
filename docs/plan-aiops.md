@@ -138,27 +138,39 @@ errores, coverage `domain/` 99.40%.
 
 **Criterio de cierre:** un `curl` con un payload de Grafana termina en un incidente resuelto en el entorno simulado.
 
-## Fase 3: Laboratorio de observabilidad real (docker compose, profile `observability`)
-- [ ] Servicios: Prometheus, Loki, Promtail/Alloy, **Grafana propio** (versión fijada y
-      verificada, provisionado como código en `docker/grafana/provisioning/`) y
-      node_exporter.
-- [ ] Workloads de prueba que fallen de verdad: un servicio HTTP que se pueda tumbar, un
-      volumen que se llene de logs, un deployment de k3d para `pod_fallido` y un
-      consumidor sobre una cola **RabbitMQ** (nuevo servicio del compose/laboratorio;
-      coincide con la métrica `rabbitmq_queue_consumers` ya asumida en
-      `infra/observabilidad.py`).
-- [ ] Inyectores de fallos (`scripts/fallas/*.sh` o `make falla-<tipo>`) que reproduzcan las 5 categorías.
-- [ ] Reglas de alerta de Grafana provisionadas como código (`docker/grafana/provisioning/`)
-      con los `alertname` del catálogo (`ServiceDown`, `DiskUsageHigh`, `PodCrashLooping`/`PodFailed`, `QueueStalled`, `CertExpiringSoon`)
-      y las etiquetas `service`, `env` y `severity`.
-- [ ] Contact point webhook hacia `POST /webhooks/grafana`, con el token de `AIOPS_API_TOKEN`.
-- [ ] Clúster **k3d** para el laboratorio (decidido: Kubernetes, no compose puro — el
-      catálogo ya asume `pod_fallido`/`kube-state-metrics`, y compose no puede reiniciar
-      servicios sin montar `docker.sock`, prohibido). Añadir kube-state-metrics.
-- [ ] Ajustar `CONSULTAS_POR_DEFECTO` de `infra/observabilidad.py` a las métricas reales
-      del laboratorio k3d + RabbitMQ (ya corregido para usar `AIOPS_SERVICE_LABEL` en la Fase 0.5).
+## Fase 3: Laboratorio de observabilidad real — ✅ hecho (parcial) 2026-10-05
+- [x] Servicios: **Prometheus** (`v3.0.1`) y **Grafana propio** (`11.4.0`, provisionado
+      como código en `docker/grafana/provisioning/`). Loki/Promtail/node_exporter
+      quedaron fuera (no eran necesarios para probar el pipeline de alertas).
+      Commit `3cd3eee`.
+- [x] Workloads de prueba reales: `checkout` (nginx, para `servicio_detenido`,
+      parado/levantado de verdad), **RabbitMQ** con el plugin `rabbitmq_prometheus`
+      (métrica nativa, sin exporter aparte) y el Deployment `api` en k3d (para
+      `pod_fallido`, métrica `kube_pod_status_ready` verificada). `disco_lleno` y
+      `certificado_por_vencer` quedaron sin workload real (ver pendientes).
+- [x] Reglas de alerta de Grafana provisionadas como código: `ServiceDown`,
+      `PodFailed`, `QueueStalled` (con los `alertname`/etiquetas del catálogo).
+      `DiskUsageHigh` y `CertExpiringSoon` quedaron sin reglas (dependen de los
+      workloads pendientes). Commit `3cd3eee`.
+- [x] Contact point webhook hacia `POST /webhooks/grafana`, con `AIOPS_API_TOKEN`.
+- [x] Clúster **k3d** (`aiops-lab`, 1 server + 1 agent) con **kube-state-metrics**
+      (manifiestos oficiales v2.13.0), expuesto al host vía NodePort. Ver
+      `k8s-lab/README.md` para reproducirlo (incluye el workaround de
+      `kubectl`+`host.docker.internal` en Windows).
+- [ ] Inyectores de fallos como script (`make falla-<tipo>`): por ahora se probó
+      parando el contenedor a mano (`docker compose stop checkout`), no hay script.
+- [ ] Ajustar `CONSULTAS_POR_DEFECTO` a disco/certificados reales: sin workload para
+      esas 2 categorías, las queries existentes (ya corregidas en la Fase 0.5 para usar
+      `AIOPS_SERVICE_LABEL`) no se verificaron contra datos reales.
 
-**Criterio de cierre:** inyectar un fallo hace que salte la alerta en Grafana y llegue el webhook a la API.
+**Criterio de cierre:** ✅ probado en vivo, de punta a punta, contra servicios reales
+(no mocks): se paró `checkout` → Prometheus marcó `up=0` → Grafana evaluó su regla y
+entregó el webhook a la API real (200 OK) → la API lo encoló en Redis/RQ real → el
+worker lo tomó y abrió el incidente en Postgres real
+(`INC-ServiceDown:checkout:...`). Se detuvo ahí, limpio, en la llamada al LLM (sin
+`ANTHROPIC_API_KEY`) — el límite ya documentado desde la Fase 2. `pod_fallido` tiene
+la regla y la métrica verificadas por separado, pero el disparo real contra k3d no se
+ejecutó por tiempo.
 
 ## Fase 4: Backend de acciones real (Kubernetes/k3d)
 - [ ] Implementar `BackendAcciones` en `infra/acciones_k8s.py` contra la API de
