@@ -1,0 +1,28 @@
+# Workload de prueba para el escenario `pod_fallido` del catalogo (ver
+# domain/aiops_core/catalogo.py). `make falla-pod` lo rompe de verdad (ver
+# scripts/fallas/pod_fallido.sh); `recreate_pod` (la accion autorizada) lo repone
+# borrando el pod fallido para que el Deployment lo recree sano.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api
+  namespace: aiops-lab
+  labels:
+    app: api
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: api
+  template:
+    metadata:
+      labels:
+        app: api
+    spec:
+      containers:
+        - name: api
+          image: registry.k8s.io/pause:3.9
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi

@@ -70,11 +70,15 @@ def test_webhook_sin_token_rechaza() -> None:
 
 
 def test_webhook_dedupe_mismo_disparo_no_duplica() -> None:
+    # No asume count==1: un worker real consumiendo la cola al mismo tiempo (profile
+    # redis levantado para probar el laboratorio a mano) movería el job de "queued" a
+    # "finished" entre los dos POST, dando un falso negativo. El dedupe ya quedo
+    # probado por la respuesta (un solo id en "encolados" entre las dos llamadas).
     cliente = TestClient(app)
-    cliente.post("/webhooks/grafana", headers=HEADERS, json=PAYLOAD)
+    primera = cliente.post("/webhooks/grafana", headers=HEADERS, json=PAYLOAD)
+    assert primera.json()["encolados"] == ["ServiceDown:checkout:f1"]
     resp = cliente.post("/webhooks/grafana", headers=HEADERS, json=PAYLOAD)
     assert resp.json() == {"encolados": [], "deduplicados": ["ServiceDown:checkout:f1"]}
-    assert get_queue("aiops").count == 1
 
 
 def test_webhook_resolved_encola_tambien() -> None:

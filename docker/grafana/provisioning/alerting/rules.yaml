@@ -1,0 +1,100 @@
+# Reglas Grafana-managed (no Prometheus/Alertmanager): Grafana evalua estas queries
+# contra el datasource Prometheus y dispara el webhook el mismo (ver contact-points.yaml).
+# alertname/labels siguen el catalogo (domain/aiops_core/catalogo.py).
+apiVersion: 1
+
+groups:
+  - orgId: 1
+    name: aiops-l1
+    folder: aiops
+    interval: 10s
+    rules:
+      - uid: aiops-service-down
+        title: ServiceDown
+        condition: umbral
+        data:
+          - refId: consulta
+            relativeTimeRange: { from: 60, to: 0 }
+            datasourceUid: prometheus-lab
+            model:
+              expr: up{job="checkout"}
+              instant: true
+              refId: consulta
+          - refId: umbral
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: consulta
+              conditions:
+                - evaluator: { type: lt, params: [1] }
+              refId: umbral
+        labels:
+          alertname: ServiceDown
+          service: checkout
+          env: dev
+          severity: critical
+        annotations:
+          summary: "Servicio checkout caido (up < 1)"
+        for: 10s
+        noDataState: OK
+        execErrState: Alerting
+
+      - uid: aiops-pod-failed
+        title: PodFailed
+        condition: umbral
+        data:
+          - refId: consulta
+            relativeTimeRange: { from: 60, to: 0 }
+            datasourceUid: prometheus-lab
+            model:
+              expr: sum(kube_pod_status_ready{condition="true",pod=~"api-.*"})
+              instant: true
+              refId: consulta
+          - refId: umbral
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: consulta
+              conditions:
+                - evaluator: { type: lt, params: [1] }
+              refId: umbral
+        labels:
+          alertname: PodFailed
+          service: api
+          env: dev
+          severity: critical
+        annotations:
+          summary: "Pod api en el cluster k3d no esta ready"
+        for: 10s
+        noDataState: OK
+        execErrState: Alerting
+
+      - uid: aiops-queue-stalled
+        title: QueueStalled
+        condition: umbral
+        data:
+          - refId: consulta
+            relativeTimeRange: { from: 60, to: 0 }
+            datasourceUid: prometheus-lab
+            model:
+              expr: rabbitmq_queue_consumers
+              instant: true
+              refId: consulta
+          - refId: umbral
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: consulta
+              conditions:
+                - evaluator: { type: lt, params: [1] }
+              refId: umbral
+        labels:
+          alertname: QueueStalled
+          service: worker
+          env: dev
+          severity: media
+        annotations:
+          summary: "Sin consumidores activos en la cola"
+        for: 10s
+        noDataState: OK
+        execErrState: Alerting

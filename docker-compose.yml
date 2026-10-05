@@ -69,7 +69,9 @@ services:
       - .:/workspace
     env_file:
       - .env
-    command: ["uv", "run", "rq", "worker", "--url", "${REDIS_URL:-redis://redis:6379/0}", "default"]
+    # "default" para trabajos genericos futuros, "aiops" para el webhook de Grafana
+    # (ver app/api.py: get_queue("aiops")).
+    command: ["uv", "run", "rq", "worker", "--url", "${REDIS_URL:-redis://redis:6379/0}", "default", "aiops"]
     depends_on:
       redis:
         condition: service_healthy
@@ -120,11 +122,90 @@ services:
       - "3000:3000"
     profiles: ["langfuse"]
 
+  # Opcional. Activar con COMPOSE_PROFILES=observability en .env. Laboratorio real de
+  # la Fase 3 (ver docs/plan-aiops.md y k8s-lab/README.md): Prometheus + Grafana +
+  # RabbitMQ + un servicio de prueba, mas la API real (app/api.py, Fase 2) para que
+  # el webhook de Grafana tenga algo que golpear. El cluster k3d (pod_fallido) es
+  # externo a compose: se crea con `k3d cluster create aiops-lab`, ver k8s-lab/.
+  prometheus:
+    # Pin exacto: version real usada y verificada en esta sesion (2026-10-05).
+    image: prom/prometheus:v3.0.1
+    volumes:
+      - ./docker/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    profiles: ["observability"]
+
+  grafana:
+    image: grafana/grafana:11.4.0
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
+      # Solo laboratorio local: permite ver dashboards sin loguearse. Nunca en una
+      # instancia expuesta a una red que no sea localhost.
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
+    volumes:
+      - ./docker/grafana/provisioning:/etc/grafana/provisioning:ro
+      - grafana_data:/var/lib/grafana
+    env_file:
+      - .env
+    ports:
+      - "3001:3000"
+    depends_on:
+      - prometheus
+    profiles: ["observability"]
+
+  # Simula el servicio del escenario `servicio_detenido` del catalogo. `up{job=...}`
+  # (metrica nativa de Prometheus) hace de senal: parar este contenedor alcanza para
+  # que la alerta ServiceDown se dispare, sin instrumentar nada.
+  checkout:
+    image: nginx:1.27-alpine
+    volumes:
+      - ./docker/nginx/metrics.txt:/usr/share/nginx/html/metrics:ro
+    profiles: ["observability"]
+
+  # Escenario `cola_detenida`: plugin rabbitmq_prometheus (metrica nativa
+  # rabbitmq_queue_consumers, la misma que ya asume infra/observabilidad.py).
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    command: ["sh", "-c", "rabbitmq-plugins enable --offline rabbitmq_prometheus && rabbitmq-server"]
+    ports:
+      - "15672:15672" # UI de management
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    profiles: ["observability"]
+
+  # API real (app/api.py, Fase 2) para que el webhook de Grafana tenga un destino.
+  # Distinto del servicio `app` (ese es la consola interactiva de make shell/run).
+  api:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.app
+    working_dir: /workspace
+    volumes:
+      - .:/workspace
+    env_file:
+      - .env
+    environment:
+      - DATABASE_URL=${DATABASE_URL:-postgresql://agent:agent@postgres:5432/agents}
+      - AIOPS_PERSISTENCIA=postgres
+    command: ["uv", "run", "uvicorn", "app.api:app", "--host", "0.0.0.0", "--port", "8000"]
+    ports:
+      - "8010:8000" # 8000 ocupado por otros proyectos en esta maquina compartida
+    depends_on:
+      postgres:
+        condition: service_healthy
+    profiles: ["observability"]
+
   # Opcional. Activar con COMPOSE_PROFILES=traefik en .env. Reverse proxy hacia
-  # `app`: NO funciona todavia porque app/main.py no expone HTTP (llega en la
-  # etapa 4, endpoint FastAPI). Usa el provider "file" de Traefik, no el
-  # provider "docker" (ese requiere montar docker.sock; ver docker-compose.yml
-  # servicio app y regla del framework de no montarlo).
+  # `app`: ver el servicio `api` arriba (Fase 2) para la API real. Usa el provider
+  # "file" de Traefik, no el provider "docker" (ese requiere montar docker.sock; ver
+  # docker-compose.yml servicio app y regla del framework de no montarlo).
   traefik:
     image: traefik:v3.3
     command: ["--configFile=/etc/traefik/traefik.yml"]
@@ -143,3 +224,4 @@ volumes:
   redis_data:
   qdrant_data:
   garage_data:
+  grafana_data:
