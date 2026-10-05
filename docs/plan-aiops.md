@@ -16,15 +16,21 @@ se monta `docker.sock`.
 
 ---
 
-## Fase 0: Validar lo existente en el contenedor
-- [ ] `make build && make check && make evals` en verde, incluido `tests/test_loader_aiops.py`.
-- [ ] Confirmar que LangChain arma bien el esquema de las tools envueltas con `functools.wraps`.
-      Si no, quitar el decorador `_seguro` y capturar errores en cada tool.
-- [ ] `make rag-init-db && make aiops-ingest` y comprobar que `make rag-query COLLECTION=aiops_runbooks Q="servicio caido"` devuelve RB-001.
-- [ ] `make aiops-demo` con `ANTHROPIC_API_KEY`: 4 incidentes resueltos, el certificado escalado, TRA impresa.
-- [ ] Cerrar o actualizar las entradas de `docs/open-questions.md` según el resultado.
+## Fase 0: Validar lo existente en el contenedor — ✅ parcial, 2026-10-05
+- [x] `make build` en verde (`docker compose build app`).
+- [x] `make lint` (ruff), `make typecheck` (mypy) y `make test` (85 tests, incluido
+      `tests/test_loader_aiops.py`) en verde.
+- [x] `make coverage`: `domain/` en 99.19% (umbral 90%).
+- [x] Confirmado parcialmente: el loader carga las 14 tools de `aiops` sin error con
+      `deepagents` instalado real. Falta confirmar el esquema que recibe el LLM.
+      Detalle actualizado en `docs/open-questions.md`.
+- [ ] **Pendiente (requiere `ANTHROPIC_API_KEY`/`OPENAI_API_KEY` reales, no disponibles
+      en esta sesión):** `make rag-init-db && make aiops-ingest`, `make rag-query
+      COLLECTION=aiops_runbooks Q="servicio caido"` (debe devolver RB-001), `make evals`
+      y `make aiops-demo` (4 incidentes resueltos, el certificado escalado, TRA impresa).
+      Correr estos cuatro con claves reales antes de dar la Fase 0 por cerrada del todo.
 
-**Criterio de cierre:** demo con LLM real que termine sin errores.
+**Criterio de cierre:** demo con LLM real que termine sin errores (pendiente de claves).
 
 ## Fase 0.5: Correcciones antes de persistir estado
 Bugs detectados por análisis de código, a corregir antes de la Fase 1 para no construir

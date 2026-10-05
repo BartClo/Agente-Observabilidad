@@ -12,12 +12,14 @@ de escribirlas. Revisar antes de depender de ellas en produccion.
   contenedor (`make shell` -> `python -c "import deepagents; help(deepagents)"`)
   antes de usar un backend distinto del default en `create_deep_agent`.
 
-- **Version exacta de `langgraph-checkpoint-postgres` compatible con
-  `deepagents==0.7.19`**. Busqueda web dio 3.0.2 (2025-12-10) pero no se pudo
-  confirmar por fetch directo a PyPI. Antes de fijarla en `pyproject.toml`
-  (etapa 4, cuando se agrega el checkpointer de Postgres), correr dentro del
-  contenedor: `uv add langgraph-checkpoint-postgres` y dejar que `uv.lock`
-  resuelva la version real, en vez de adivinar el pin.
+- ~~Version exacta de `langgraph-checkpoint-postgres`~~ **RESUELTO (2026-10-05)**:
+  confirmado por fetch directo a `https://pypi.org/pypi/langgraph-checkpoint-postgres/json`,
+  no por busqueda web. Latest es `3.1.2` (2026-08-07), exige
+  `langgraph-checkpoint>=4.1.0,<5.0.0`. `deepagents==0.7.19` no la fija de forma
+  directa (la trae transitiva via `langchain`/`langgraph`), asi que el pin final
+  lo termina de confirmar `uv add langgraph-checkpoint-postgres==3.1.2` dentro del
+  contenedor cuando se implemente la Fase 1 de `docs/plan-aiops.md` (dejar que
+  `uv.lock` resuelva las transitivas, no adivinarlas).
 
 - **Formato esperado de `SubAgent["skills"]`**: `app/loader.py` (`_load_skills`)
   asume que es una lista de rutas de carpeta (una por skill, cada una con
@@ -53,8 +55,11 @@ de escribirlas. Revisar antes de depender de ellas en produccion.
 - **Esquema de tools desde funciones envueltas**: `agents/aiops/tools.py` envuelve
   cada tool con `functools.wraps` (devuelve los errores como texto). Se asume que
   LangChain arma el esquema siguiendo `__wrapped__` (firma y docstring originales).
-  No se probo con `deepagents` instalado: correr `tests/test_loader_aiops.py` y
-  una `make aiops-demo` antes de confiar en ello.
+  PARCIAL (2026-10-05): `tests/test_loader_aiops.py` corre dentro del contenedor
+  con `deepagents` instalado y pasa: el loader resuelve y carga las 14 tools sin
+  error. Sigue sin confirmar que el LLM reciba el esquema correcto en una llamada
+  real: falta `make aiops-demo` con `ANTHROPIC_API_KEY` (no disponible en esta
+  sesion) antes de confiar en ello para produccion.
 
 - **Consultas PromQL/LogQL de `infra/observabilidad.py`**: supuestos sobre
   node_exporter, kube-state-metrics, rabbitmq y blackbox_exporter, y la etiqueta
