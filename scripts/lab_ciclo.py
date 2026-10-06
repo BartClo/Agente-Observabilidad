@@ -64,6 +64,7 @@ def main(alertname: str, servicio: str) -> int:
         print(f"decision: {aprob.veredicto} por {aprob.usuario}")
         if aprob.veredicto != "aprobado":
             return 1  # rechazar() ya escalo el incidente
+        t0 = time.time()  # medir la remediacion, no la espera humana
         res = ciclo.ejecutar_remediacion(inc.id, aprobada=True)
         print("remediacion (aprobada):", res.mensaje)
     if not res.ejecutada:

@@ -267,8 +267,11 @@ línea de tiempo registra quién aprobó.
 que el clic en "Aprobar" se emuló con la misma petición que hace el botón (mismo
 método, ruta con el id codificado con `encodeURIComponent` — `:` como `%3A` —, mismas
 cabeceras y cuerpo). Se verificó además que `/ui` responde 200 con la CSP, que el
-dashboard carga con sus 6 paneles y que Prometheus scrapea la API. Falta mirar el
-render del iframe dentro de Grafana en un navegador real.
+dashboard carga con sus 6 paneles y que Prometheus scrapea la API.
+
+**Clic real verificado despues:** el usuario aprobo un incidente desde la UI en el
+navegador (`decision: aprobado por marcelo`) y el ciclo recreo el pod, verifico y
+cerro con `resuelto_autonomo=False`.
 
 ## Fase 6: Endurecimiento y operación
 - [ ] Langfuse (profile ya existente) o métricas propias para el costo de tokens por incidente (métrica de la tesis).
