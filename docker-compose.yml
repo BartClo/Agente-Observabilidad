@@ -146,8 +146,13 @@ services:
       # instancia expuesta a una red que no sea localhost.
       - GF_AUTH_ANONYMOUS_ENABLED=true
       - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
+      # Fase 5: permite el <iframe> de la UI del agente en un panel Text. RIESGO: con
+      # esto cualquiera que pueda editar un dashboard puede inyectar HTML/JS. Aceptable
+      # en este laboratorio local; en una instancia compartida usar un plugin de panel.
+      - GF_PANELS_DISABLE_SANITIZE_HTML=true
     volumes:
       - ./docker/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./docker/grafana/dashboards:/var/lib/grafana/dashboards:ro
       - grafana_data:/var/lib/grafana
     env_file:
       - .env

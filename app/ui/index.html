@@ -1,0 +1,252 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AIOps L1</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --panel: #ffffff; --text: #1d2128; --muted: #5b6472; --line: #dde1e7;
+    --accent: #2f6fde; --ok: #1f8a4c; --warn: #b26b00; --bad: #c4352b; --chip: #eef1f5;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #111217; --panel: #181b1f; --text: #d8dbe0; --muted: #8e95a1; --line: #2b2f36;
+      --accent: #5b9bff; --ok: #3ec27a; --warn: #f0a83a; --bad: #f2645a; --chip: #22262c;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { padding: 16px; max-width: 1200px; margin: 0 auto; display: grid; gap: 16px; }
+  h1 { font-size: 16px; margin: 0; }
+  h2 { font-size: 13px; margin: 0 0 8px; color: var(--muted); font-weight: 600;
+       text-transform: uppercase; letter-spacing: .04em; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 12px; }
+  .barra { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .barra .espacio { flex: 1; }
+  input { background: var(--bg); color: var(--text); border: 1px solid var(--line);
+          border-radius: 4px; padding: 6px 8px; font: inherit; min-width: 0; }
+  button { font: inherit; border-radius: 4px; padding: 6px 10px; cursor: pointer;
+           border: 1px solid var(--line); background: var(--chip); color: var(--text); }
+  button.primario { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button.peligro { border-color: var(--bad); color: var(--bad); }
+  button:disabled { opacity: .5; cursor: default; }
+  button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .tarjetas { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); }
+  .tarjeta .valor { font-size: 24px; font-weight: 600; margin-top: 4px; font-variant-numeric: tabular-nums; }
+  .tarjeta .sub { color: var(--muted); font-size: 12px; }
+  .tabla { width: 100%; overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 8px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+  th { color: var(--muted); font-weight: 600; font-size: 12px; }
+  tr.fila { cursor: pointer; }
+  tr.fila:hover, tr.fila.sel { background: var(--chip); }
+  .mono { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12px; }
+  .chip { display: inline-block; padding: 1px 8px; border-radius: 999px; background: var(--chip);
+          font-size: 12px; white-space: nowrap; }
+  .chip.resuelto { color: var(--ok); } .chip.escalado { color: var(--bad); }
+  .chip.espera { color: var(--warn); font-weight: 600; }
+  .acciones { display: flex; gap: 6px; }
+  ol.linea { list-style: none; margin: 0; padding: 0; }
+  ol.linea li { padding: 6px 0; border-bottom: 1px solid var(--line); display: grid;
+                grid-template-columns: 90px 160px 1fr; gap: 8px; }
+  ol.linea .datos { color: var(--muted); overflow-wrap: anywhere; }
+  .vacio { color: var(--muted); padding: 8px 0; }
+  .aviso { color: var(--bad); }
+  #estado { color: var(--muted); font-size: 12px; }
+  @media (max-width: 640px) { ol.linea li { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<main>
+  <div class="panel barra">
+    <h1>AIOps · incidentes L1</h1>
+    <span class="espacio"></span>
+    <label>Usuario <input id="usuario" placeholder="ana@equipo" autocomplete="username" size="14"></label>
+    <label>Token <input id="token" type="password" autocomplete="off" size="14"></label>
+    <button id="guardar" class="primario">Conectar</button>
+    <span id="estado" role="status" aria-live="polite"></span>
+  </div>
+
+  <section class="tarjetas" aria-label="Métricas de la tesis">
+    <div class="panel tarjeta"><h2>TRA</h2><div class="valor" id="m-tra">–</div>
+      <div class="sub">resueltos sin humano / elegibles</div></div>
+    <div class="panel tarjeta"><h2>MTTR</h2><div class="valor" id="m-mttr">–</div>
+      <div class="sub">desde el disparo de la alerta</div></div>
+    <div class="panel tarjeta"><h2>Incidentes</h2><div class="valor" id="m-total">–</div>
+      <div class="sub" id="m-espera"></div></div>
+    <div class="panel tarjeta"><h2>Kill switch</h2><div class="valor" id="m-kill">–</div>
+      <button id="kill" class="peligro" disabled>–</button></div>
+  </section>
+
+  <section class="panel">
+    <h2>Incidentes</h2>
+    <div class="tabla">
+      <table>
+        <thead><tr><th>Incidente</th><th>Alerta</th><th>Servicio</th><th>Estado</th>
+          <th>Autónomo</th><th>Decisión humana</th></tr></thead>
+        <tbody id="filas"><tr><td colspan="6" class="vacio">Conectar con el token para ver los incidentes.</td></tr></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="panel" id="detalle" hidden>
+    <h2 id="detalle-titulo">Línea de tiempo</h2>
+    <p id="detalle-resumen" class="mono"></p>
+    <ol class="linea" id="linea"></ol>
+  </section>
+</main>
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const leer = (k) => { try { return sessionStorage.getItem(k) || ""; } catch { return ""; } };
+const guardar = (k, v) => { try { sessionStorage.setItem(k, v); } catch {} };
+let seleccionado = null;
+
+$("token").value = leer("aiops-token");
+$("usuario").value = leer("aiops-usuario");
+
+function el(tag, texto, clase) {
+  const n = document.createElement(tag);
+  if (texto !== undefined && texto !== null) n.textContent = String(texto);
+  if (clase) n.className = clase;
+  return n;
+}
+
+async function api(ruta, opciones = {}) {
+  const r = await fetch(ruta, {
+    ...opciones,
+    headers: { "Authorization": "Bearer " + leer("aiops-token"), "Content-Type": "application/json" },
+  });
+  if (!r.ok) {
+    let detalle = r.statusText;
+    try { detalle = (await r.json()).detail || detalle; } catch {}
+    throw new Error(r.status + " " + detalle);
+  }
+  return r.json();
+}
+
+const enEspera = (i) => i.estado === "diagnosticado" && i.elegible && !i.aprobacion;
+
+function estadoChip(i) {
+  if (enEspera(i)) return el("span", "esperando aprobación", "chip espera");
+  return el("span", i.estado, "chip " + i.estado);
+}
+
+function usuarioActual() {
+  const u = $("usuario").value.trim();
+  if (!u) { $("estado").textContent = "Indicá tu usuario: queda registrado en la auditoría."; $("usuario").focus(); }
+  return u;
+}
+
+async function decidir(id, veredicto) {
+  const usuario = usuarioActual();
+  if (!usuario) return;
+  let cuerpo = { usuario };
+  if (veredicto === "rechazar") {
+    const motivo = prompt("Motivo del rechazo (el incidente se escala):");
+    if (motivo === null) return;
+    cuerpo.motivo = motivo;
+  }
+  try {
+    await api(`/incidentes/${encodeURIComponent(id)}/${veredicto}`, { method: "POST", body: JSON.stringify(cuerpo) });
+    $("estado").textContent = `${veredicto === "aprobar" ? "Aprobado" : "Rechazado"} ${id} por ${usuario}.`;
+    seleccionado = id;
+    await refrescar();
+  } catch (e) { $("estado").textContent = "Error: " + e.message; }
+}
+
+function pintarFilas(incidentes) {
+  const tbody = $("filas");
+  tbody.replaceChildren();
+  if (!incidentes.length) {
+    const tr = el("tr"); const td = el("td", "Sin incidentes.", "vacio"); td.colSpan = 6;
+    tr.append(td); tbody.append(tr); return;
+  }
+  incidentes.sort((a, b) => (b.abierto_en || 0) - (a.abierto_en || 0));
+  for (const i of incidentes) {
+    const tr = el("tr", null, "fila" + (i.id === seleccionado ? " sel" : ""));
+    tr.tabIndex = 0;
+    tr.addEventListener("click", () => { seleccionado = i.id; verDetalle(i.id); pintarFilas(incidentes); });
+    tr.addEventListener("keydown", (ev) => { if (ev.key === "Enter") tr.click(); });
+    const decision = el("td");
+    if (enEspera(i)) {
+      const acc = el("div", null, "acciones");
+      const a = el("button", "Aprobar", "primario");
+      const r = el("button", "Rechazar", "peligro");
+      a.addEventListener("click", (ev) => { ev.stopPropagation(); decidir(i.id, "aprobar"); });
+      r.addEventListener("click", (ev) => { ev.stopPropagation(); decidir(i.id, "rechazar"); });
+      acc.append(a, r); decision.append(acc);
+    } else {
+      decision.textContent = i.aprobacion || "—";
+    }
+    const estado = el("td"); estado.append(estadoChip(i));
+    tr.append(el("td", i.id, "mono"), el("td", i.alerta), el("td", i.servicio), estado,
+              el("td", i.resuelto_autonomo ? "sí" : "no"), decision);
+    tbody.append(tr);
+  }
+}
+
+async function verDetalle(id) {
+  try {
+    const d = await api(`/incidentes/${encodeURIComponent(id)}`);
+    $("detalle").hidden = false;
+    $("detalle-titulo").textContent = "Línea de tiempo · " + d.id;
+    $("detalle-resumen").textContent =
+      `causa: ${d.causa ?? "—"} · confianza: ${d.confianza} · acciones: ${d.acciones.length}` +
+      (d.motivo_escalamiento ? ` · escalado: ${d.motivo_escalamiento}` : "");
+    const ol = $("linea"); ol.replaceChildren();
+    for (const e of d.linea_de_tiempo) {
+      const li = el("li");
+      li.append(el("span", new Date(e.ts * 1000).toLocaleTimeString(), "mono"),
+                el("strong", e.tipo), el("span", JSON.stringify(e.datos), "datos mono"));
+      ol.append(li);
+    }
+  } catch (e) { $("estado").textContent = "Error: " + e.message; }
+}
+
+async function refrescar() {
+  if (!leer("aiops-token")) return;
+  try {
+    const [incidentes, m, ks] = await Promise.all([api("/incidentes"), api("/metricas"), api("/kill-switch")]);
+    pintarFilas(incidentes);
+    $("m-tra").textContent = m.tra == null ? "–" : m.tra.toFixed(1) + "%";
+    $("m-mttr").textContent = m.mttr_segundos == null ? "–" : Math.round(m.mttr_segundos) + " s";
+    $("m-total").textContent = m.total_incidentes;
+    const espera = incidentes.filter(enEspera).length;
+    $("m-espera").textContent = espera ? `${espera} esperando aprobación` : "ninguno esperando";
+    $("m-kill").textContent = ks.activo ? "ACTIVO" : "apagado";
+    $("m-kill").className = "valor" + (ks.activo ? " aviso" : "");
+    const kb = $("kill");
+    kb.disabled = false;
+    kb.textContent = ks.activo ? "Desactivar" : "Activar";
+    kb.dataset.activo = ks.activo ? "1" : "";
+    if (seleccionado) await verDetalle(seleccionado);
+    if (!$("estado").textContent.startsWith("Error")) $("estado").textContent = "Actualizado " + new Date().toLocaleTimeString();
+  } catch (e) { $("estado").textContent = "Error: " + e.message; }
+}
+
+$("guardar").addEventListener("click", () => {
+  guardar("aiops-token", $("token").value.trim());
+  guardar("aiops-usuario", $("usuario").value.trim());
+  $("estado").textContent = "";
+  refrescar();
+});
+$("usuario").addEventListener("change", () => guardar("aiops-usuario", $("usuario").value.trim()));
+$("kill").addEventListener("click", async () => {
+  const usuario = usuarioActual(); if (!usuario) return;
+  const activar = !$("kill").dataset.activo;
+  const motivo = activar ? prompt("Motivo para activar el kill switch (frena toda ejecución):") : "";
+  if (activar && motivo === null) return;
+  try {
+    await api("/kill-switch", { method: "POST", body: JSON.stringify({ usuario, activo: activar, motivo }) });
+    await refrescar();
+  } catch (e) { $("estado").textContent = "Error: " + e.message; }
+});
+
+refrescar();
+setInterval(refrescar, 5000);
+</script>
+</body>
+</html>

@@ -130,3 +130,34 @@ def test_metricas_y_metrics_prometheus(cliente: TestClient) -> None:
     assert prom.status_code == 200
     assert 'aiops_incidentes_total{estado="resuelto"} 1' in prom.text
     assert "aiops_tra_ratio 100.0" in prom.text
+
+
+def test_ui_se_sirve_sin_token_con_csp_de_framing() -> None:
+    """Fase 5: la pagina no trae datos (los pide con el token del operador), asi que
+    se sirve sin token; frame-ancestors limita quien la puede embeber."""
+    resp = TestClient(app).get("/ui")
+    assert resp.status_code == 200
+    assert "AIOps" in resp.text
+    csp = resp.headers["content-security-policy"]
+    assert "frame-ancestors" in csp and "http://localhost:3001" in csp
+    assert "Bearer" in resp.text and "textContent" in resp.text  # token por cabecera, sin innerHTML
+    assert "innerHTML" not in resp.text
+
+
+def test_resumen_trae_aprobacion_y_metrics_trae_acciones(cliente: TestClient) -> None:
+    ciclo = runtime.get_ciclo()
+    alerta_id = ciclo.alertas_activas()[0].split(" | ")[0]
+    inc_id = ciclo.abrir(alerta_id).id
+    ciclo.confirmar_anomalia(inc_id)
+    categoria, _, _ = ciclo.clasificar(inc_id)
+    assert categoria is not None
+    ciclo.registrar_diagnostico(inc_id, "causa", 0.9, categoria.runbook_id)
+    ciclo.aprobar(inc_id, "ana@equipo")
+    ciclo.ejecutar_remediacion(inc_id, aprobada=True)
+
+    resumen = cliente.get("/incidentes", headers=HEADERS).json()[0]
+    assert resumen["aprobacion"] == "aprobado"
+    assert resumen["abierto_en"] > 0
+
+    prom = cliente.get("/metrics").text
+    assert 'aiops_acciones_total{accion="restart_service",ok="true"} 1' in prom

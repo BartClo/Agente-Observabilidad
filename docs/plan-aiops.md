@@ -229,18 +229,46 @@ resuelto_autonomo=True`, persistido en Postgres.
   política nunca deja actuar al agente sobre severidad crítica. Bajadas a `alta`: son
   candidatos L1. Sin este cambio, el pipeline real habría escalado siempre.
 
-## Fase 5: UI integrada en Grafana
-- [ ] UI web servida por la API (`/ui`): lista de incidentes, línea de tiempo, botones
-      Aprobar/Rechazar, kill switch y tarjetas de TRA y MTTR. **Sin chat** (postergado:
-      no aporta a H1/H2/H3; se evalúa como extra después de la Fase 7).
-- [ ] Cabeceras: permitir framing desde el origen de Grafana (`Content-Security-Policy: frame-ancestors <grafana>`).
-- [ ] Dashboard provisionado "AIOps" con:
-  - Panel Text con un `<iframe src="/ui">`. Requiere `disable_sanitize_html = true` en
-    `grafana.ini`; documentar el riesgo.
-  - Paneles de series temporales sobre `/metrics` (incidentes por estado, MTTR, TRA, acciones).
-- [ ] Opcional, fase posterior: plugin de tipo app de Grafana si se quiere una entrada propia en el menú.
+## Fase 5: UI integrada en Grafana — ✅ cerrada 2026-10-06
+- [x] UI servida por la API (`GET /ui`, `app/ui/index.html`): HTML + JS vanilla, sin
+      build ni dependencias. Tarjetas de TRA/MTTR/incidentes/kill switch, tabla de
+      incidentes, aprobar/rechazar (pide motivo al rechazar), línea de tiempo de
+      auditoría y refresco cada 5s. Tema claro/oscuro. **Sin chat** (decisión 4).
+- [x] Seguridad de la UI:
+  - La página se sirve sin token pero no trae datos: los pide a la API con el token que
+    el operador ingresa (`sessionStorage`), por cabecera `Authorization` — no por
+    cookie, así que no hay superficie de CSRF.
+  - Todo dato se pinta con `textContent` (sin `innerHTML`): un nombre de servicio o un
+    motivo con HTML no se ejecuta. Verificado por test.
+  - El usuario que aprueba queda en la auditoría (`aprobacion: {usuario, veredicto}`).
+  - `Content-Security-Policy: frame-ancestors` configurable (`AIOPS_UI_FRAME_ANCESTORS`,
+    default `'self' http://localhost:3001`).
+- [x] Dashboard provisionado "AIOps L1" (`docker/grafana/dashboards/aiops.json`): TRA y
+      MTTR (stat), incidentes por estado, alertas L1 activas (alertlist), acciones
+      ejecutadas, y la UI en un panel Text con `<iframe>`.
+  - **Riesgo documentado:** el iframe exige `GF_PANELS_DISABLE_SANITIZE_HTML=true`;
+    con eso, quien pueda editar un dashboard puede inyectar HTML/JS en Grafana.
+    Aceptable en el laboratorio local; en una instancia compartida, un plugin de panel.
+- [x] Prometheus scrapea `/metrics` de la API (`job: aiops-api`). Se agregó
+      `aiops_acciones_total{accion,ok}` (pendiente desde la Fase 2).
+- [x] `scripts/lab_ciclo.py` soporta nivel 2: ante "requiere aprobación" espera la
+      decisión registrada en Postgres por la UI y recién entonces ejecuta (lo que haría
+      el agente pausado por `interrupt_on`, sin LLM).
+- [ ] Opcional (no hecho): plugin de app de Grafana con entrada propia en el menú.
 
-**Criterio de cierre:** aprobar una acción de nivel 2 desde el iframe en Grafana y ver el incidente resuelto.
+**Criterio de cierre: ✅ en vivo**, con autonomía 2: `pod_ready=0` → anomalía
+confirmada → la política responde "requiere aprobación" y el ciclo **pausa** → la UI
+lo muestra como "esperando aprobación" → se aprueba (`marcelo@equipo`) → la política
+permite → `recreate_pod` en k3d → 32s de sondeo → `pod_ready=1` → **CERRADO con
+`resuelto_autonomo=False`** (correcto: con aprobación humana no cuenta para la TRA). La
+línea de tiempo registra quién aprobó.
+
+**Límite honesto de la verificación:** no había navegador disponible en la sesión, así
+que el clic en "Aprobar" se emuló con la misma petición que hace el botón (mismo
+método, ruta con el id codificado con `encodeURIComponent` — `:` como `%3A` —, mismas
+cabeceras y cuerpo). Se verificó además que `/ui` responde 200 con la CSP, que el
+dashboard carga con sus 6 paneles y que Prometheus scrapea la API. Falta mirar el
+render del iframe dentro de Grafana en un navegador real.
 
 ## Fase 6: Endurecimiento y operación
 - [ ] Langfuse (profile ya existente) o métricas propias para el costo de tokens por incidente (métrica de la tesis).

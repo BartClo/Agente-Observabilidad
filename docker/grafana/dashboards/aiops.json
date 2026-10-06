@@ -1,0 +1,63 @@
+{
+  "uid": "aiops-l1",
+  "title": "AIOps L1",
+  "description": "Agente AIOps de la tesis: metricas (TRA, MTTR), alertas L1 activas y operacion de incidentes (UI embebida, app/ui/index.html).",
+  "tags": ["aiops", "tesis"],
+  "timezone": "browser",
+  "refresh": "10s",
+  "time": { "from": "now-1h", "to": "now" },
+  "schemaVersion": 39,
+  "editable": true,
+  "panels": [
+    {
+      "id": 1, "type": "stat", "title": "TRA (resolución autónoma)",
+      "description": "Elegibles resueltos y verificados sin intervención humana / elegibles. Criterio H1 de la tesis: >= 30%.",
+      "gridPos": { "x": 0, "y": 0, "w": 6, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "prometheus-lab" },
+      "targets": [{ "refId": "A", "expr": "aiops_tra_ratio", "instant": true }],
+      "fieldConfig": { "defaults": { "unit": "percent", "decimals": 1, "min": 0, "max": 100,
+        "thresholds": { "mode": "absolute", "steps": [
+          { "color": "red", "value": null }, { "color": "orange", "value": 15 }, { "color": "green", "value": 30 } ] } } },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "value", "graphMode": "area" }
+    },
+    {
+      "id": 2, "type": "stat", "title": "MTTR",
+      "description": "Desde el disparo de la alerta hasta el cierre verificado (Alerta.disparada_en).",
+      "gridPos": { "x": 6, "y": 0, "w": 6, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "prometheus-lab" },
+      "targets": [{ "refId": "A", "expr": "aiops_mttr_seconds", "instant": true }],
+      "fieldConfig": { "defaults": { "unit": "s", "decimals": 0, "color": { "mode": "fixed", "fixedColor": "blue" } } },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "value", "graphMode": "area" }
+    },
+    {
+      "id": 3, "type": "bargauge", "title": "Incidentes por estado",
+      "gridPos": { "x": 12, "y": 0, "w": 12, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "prometheus-lab" },
+      "targets": [{ "refId": "A", "expr": "sum by (estado) (aiops_incidentes_total)", "instant": true, "legendFormat": "{{estado}}" }],
+      "fieldConfig": { "defaults": { "unit": "none", "decimals": 0, "color": { "mode": "fixed", "fixedColor": "blue" } } },
+      "options": { "orientation": "horizontal", "displayMode": "basic", "reduceOptions": { "calcs": ["lastNotNull"] } }
+    },
+    {
+      "id": 4, "type": "alertlist", "title": "Alertas L1 activas",
+      "gridPos": { "x": 0, "y": 4, "w": 8, "h": 8 },
+      "options": { "viewMode": "list", "groupMode": "default", "maxItems": 20, "sortOrder": 1,
+        "stateFilter": { "firing": true, "pending": true, "normal": false, "error": true, "noData": false },
+        "alertInstanceLabelFilter": "", "folder": null, "showInstances": false }
+    },
+    {
+      "id": 5, "type": "timeseries", "title": "Acciones ejecutadas",
+      "gridPos": { "x": 8, "y": 4, "w": 16, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus-lab" },
+      "targets": [{ "refId": "A", "expr": "sum by (accion, ok) (aiops_acciones_total)", "legendFormat": "{{accion}} ok={{ok}}" }],
+      "fieldConfig": { "defaults": { "unit": "none", "decimals": 0, "custom": { "lineWidth": 2, "fillOpacity": 0 } } },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" } }
+    },
+    {
+      "id": 6, "type": "text", "title": "Operación de incidentes",
+      "description": "UI del agente (app/ui/index.html) servida por la API. Requiere disable_sanitize_html en Grafana (ver docker-compose.yml, riesgo documentado en docs/plan-aiops.md Fase 5).",
+      "gridPos": { "x": 0, "y": 12, "w": 24, "h": 22 },
+      "options": { "mode": "html",
+        "content": "<iframe src=\"http://localhost:8010/ui\" title=\"Operación de incidentes AIOps\" style=\"width:100%;height:100%;border:0\"></iframe>" }
+    }
+  ]
+}

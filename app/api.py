@@ -16,10 +16,11 @@ from __future__ import annotations
 
 import dataclasses
 import os
+from pathlib import Path
 from typing import Annotated, Any
 
 from fastapi import Depends, FastAPI, Header, HTTPException
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import HTMLResponse, PlainTextResponse
 
 from agents.aiops import runtime
 from domain.aiops_core import metricas
@@ -46,6 +47,23 @@ _AUTENTICADO = [Depends(requiere_token)]
 @app.get("/salud")
 def salud() -> dict[str, str]:
     return {"estado": "ok"}
+
+
+_UI = Path(__file__).parent / "ui" / "index.html"
+
+
+@app.get("/ui", response_class=HTMLResponse)
+def ui() -> HTMLResponse:
+    """UI para operar incidentes (Fase 5), pensada para embeberse en Grafana. Sin token:
+    la pagina no trae datos; los pide a la API con el token que el operador ingresa
+    (sessionStorage), en cabecera Authorization -- no cookie, asi que no hay CSRF.
+    `frame-ancestors` limita quien la puede embeber (AIOPS_UI_FRAME_ANCESTORS)."""
+    ancestros = os.environ.get("AIOPS_UI_FRAME_ANCESTORS", "'self' http://localhost:3001")
+    csp = (
+        "default-src 'self'; script-src 'self' 'unsafe-inline'; "
+        f"style-src 'self' 'unsafe-inline'; connect-src 'self'; frame-ancestors {ancestros}"
+    )
+    return HTMLResponse(_UI.read_text(encoding="utf-8"), headers={"Content-Security-Policy": csp})
 
 
 @app.post("/webhooks/grafana", dependencies=_AUTENTICADO)
@@ -96,6 +114,8 @@ def _resumen(inc: Incidente) -> dict[str, Any]:
         "verificado": inc.verificado,
         "resuelto_autonomo": inc.resuelto_autonomo,
         "intervencion_humana": inc.intervencion_humana,
+        "aprobacion": inc.aprobacion.veredicto if inc.aprobacion else None,
+        "abierto_en": inc.abierto_en,
     }
 
 
@@ -206,6 +226,16 @@ def metricas_prometheus() -> str:
         por_estado[str(i.estado)] = por_estado.get(str(i.estado), 0) + 1
     for estado, n in sorted(por_estado.items()):
         lineas.append(f'aiops_incidentes_total{{estado="{estado}"}} {n}')
+    lineas += [
+        "# HELP aiops_acciones_total Acciones ejecutadas.",
+        "# TYPE aiops_acciones_total gauge",
+    ]
+    por_accion: dict[tuple[str, bool], int] = {}
+    for i in incidentes:
+        for a in i.acciones:
+            por_accion[(a.nombre, a.ok)] = por_accion.get((a.nombre, a.ok), 0) + 1
+    for (accion, ok), n in sorted(por_accion.items()):
+        lineas.append(f'aiops_acciones_total{{accion="{accion}",ok="{str(ok).lower()}"}} {n}')
     tra_help = "Tasa de resolucion autonoma (0 a 100)."
     for nombre, help_, fn in (
         ("aiops_tra_ratio", tra_help, metricas.tasa_resolucion_autonoma),

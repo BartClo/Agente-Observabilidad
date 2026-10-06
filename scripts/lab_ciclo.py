@@ -17,6 +17,7 @@ import time
 from agents.aiops import runtime
 from domain.aiops_core.catalogo import categoria_para_alerta
 from domain.aiops_core.modelos import Alerta, Severidad
+from domain.aiops_core.politicas import Veredicto
 
 
 def main(alertname: str, servicio: str) -> int:
@@ -53,6 +54,18 @@ def main(alertname: str, servicio: str) -> int:
     t0 = time.time()
     res = ciclo.ejecutar_remediacion(inc.id, aprobada=False)
     print("remediacion:", res.mensaje)
+    if res.veredicto is Veredicto.APROBACION:
+        # Nivel 2: lo que hace el agente pausado por interrupt_on, sin LLM. La decision
+        # la registra un humano desde la UI (/ui -> POST /incidentes/{id}/aprobar), en
+        # otro proceso: por eso exige AIOPS_PERSISTENCIA=postgres.
+        print(f"esperando decision humana en la UI para {inc.id} ...", flush=True)
+        while (aprob := ciclo.incidente(inc.id).aprobacion) is None:
+            time.sleep(2)
+        print(f"decision: {aprob.veredicto} por {aprob.usuario}")
+        if aprob.veredicto != "aprobado":
+            return 1  # rechazar() ya escalo el incidente
+        res = ciclo.ejecutar_remediacion(inc.id, aprobada=True)
+        print("remediacion (aprobada):", res.mensaje)
     if not res.ejecutada:
         print(ciclo.escalar(inc.id, res.mensaje))
         return 1
