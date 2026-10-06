@@ -86,6 +86,9 @@ class Incidente:
     cerrado_en: float | None = None
     motivo_escalamiento: str | None = None
     aprobacion: Aprobacion | None = None
+    # Costo del LLM al atender el incidente (Fase 6, metrica de la tesis).
+    tokens_entrada: int = 0
+    tokens_salida: int = 0
 
     @property
     def intentos(self) -> int:

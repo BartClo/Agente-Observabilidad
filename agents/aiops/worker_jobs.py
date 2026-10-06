@@ -85,11 +85,35 @@ def procesar_alerta_webhook(alerta_dict: dict[str, Any], es_firing: bool) -> str
         # ejecuta cada job en un proceso hijo, asi que esto no afecta a otros jobs.
         runtime.reset(ciclo)
 
+        from langchain_core.callbacks import UsageMetadataCallbackHandler
+
         from app.main import build_agent
 
         pedido = (
             f"Atiende el incidente {inc.id} (alerta {alerta.nombre} en {alerta.servicio}, "
             f"entorno {alerta.entorno}) hasta cerrarlo o escalarlo."
         )
-        build_agent().invoke({"messages": [{"role": "user", "content": pedido}]})
+        # El callback suma el uso de TODAS las llamadas al LLM de la corrida, incluidas
+        # las del subagente aiops dentro de su tool call: contar solo los mensajes
+        # finales del orquestador subestimaria el costo (Fase 6).
+        uso = UsageMetadataCallbackHandler()
+        try:
+            build_agent().invoke(
+                {"messages": [{"role": "user", "content": pedido}]},
+                config={"callbacks": [uso]},
+            )
+        finally:
+            # Tambien si el agente fallo a mitad: los tokens gastados igual cuestan.
+            entrada, salida = tokens_de(uso.usage_metadata)
+            if entrada or salida:
+                ciclo.registrar_costo_llm(inc.id, entrada=entrada, salida=salida)
     return f"{inc.id} procesado por el agente"
+
+
+def tokens_de(uso_por_modelo: dict[str, Any]) -> tuple[int, int]:
+    """Suma entrada/salida de `UsageMetadataCallbackHandler.usage_metadata` ({modelo:
+    {input_tokens, output_tokens, ...}}): el orquestador y el subagente pueden usar
+    modelos distintos."""
+    entrada = sum(int(u.get("input_tokens", 0)) for u in uso_por_modelo.values())
+    salida = sum(int(u.get("output_tokens", 0)) for u in uso_por_modelo.values())
+    return entrada, salida

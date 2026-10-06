@@ -16,7 +16,7 @@ from domain.aiops_core.ciclo import Ciclo
 from domain.aiops_core.modelos import Aprobacion, NivelAutonomia
 from domain.aiops_core.politicas import Politica
 from domain.aiops_core.simulador import EntornoSimulado
-from infra.incidentes_postgres import RepositorioIncidentesPostgres
+from infra.incidentes_postgres import RepositorioIncidentesPostgres, _a_dict
 
 
 @pytest.fixture
@@ -77,3 +77,20 @@ def test_sobrevive_acciones_y_aprobacion(repo: RepositorioIncidentesPostgres) ->
     assert ok
     cerrado = ciclo2.cerrar(inc_id)
     assert cerrado.estado.value == "resuelto"
+
+
+def test_lee_incidentes_guardados_antes_de_la_fase_6(repo: RepositorioIncidentesPostgres) -> None:
+    """Filas viejas no tienen tokens_entrada/tokens_salida en el JSONB: se leen con 0."""
+    from psycopg.types.json import Jsonb
+
+    env = EntornoSimulado()
+    alerta = env.inyectar_fallo("checkout", "servicio_detenido")
+    ciclo = Ciclo(env, env, Politica(), Auditoria(), repositorio=repo)
+    inc = ciclo.abrir(alerta.id)
+    viejo = {k: v for k, v in _a_dict(inc).items() if not k.startswith("tokens_")}
+    with psycopg.connect(os.environ["DATABASE_URL"], autocommit=True) as conn:
+        conn.execute(
+            "UPDATE aiops_incidentes SET incidente = %s WHERE id = %s", (Jsonb(viejo), inc.id)
+        )
+    leido = repo.obtener(inc.id)
+    assert leido is not None and (leido.tokens_entrada, leido.tokens_salida) == (0, 0)

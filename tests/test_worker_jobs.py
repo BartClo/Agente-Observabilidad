@@ -59,7 +59,7 @@ def test_firing_las_tools_del_agente_ven_el_incidente(monkeypatch: pytest.Monkey
     vistos: list[str] = []
 
     class AgenteFalso:
-        def invoke(self, entrada: dict[str, Any]) -> dict[str, Any]:
+        def invoke(self, entrada: dict[str, Any], config: Any = None) -> dict[str, Any]:
             pedido = entrada["messages"][0]["content"]
             inc_id = re.search(r"incidente (\S+) \(", pedido).group(1)  # type: ignore[union-attr]
             vistos.append(tools.estado_incidente(inc_id))
@@ -89,3 +89,38 @@ def test_lock_un_incidente_por_servicio_a_la_vez(monkeypatch: pytest.MonkeyPatch
             pass
     with bloqueo_servicio("svc-lock-test"):  # liberado al salir
         pass
+
+
+def test_tokens_de_suma_todos_los_modelos() -> None:
+    """Orquestador y subagente pueden usar modelos distintos: se suman todos."""
+    from agents.aiops.worker_jobs import tokens_de
+
+    uso = {
+        "claude-orquestador": {"input_tokens": 1000, "output_tokens": 50, "total_tokens": 1050},
+        "claude-subagente": {"input_tokens": 4000, "output_tokens": 600, "total_tokens": 4600},
+    }
+    assert tokens_de(uso) == (5000, 650)
+    assert tokens_de({}) == (0, 0)
+
+
+@requiere_redis
+def test_firing_registra_tokens_aunque_el_agente_falle(monkeypatch: pytest.MonkeyPatch) -> None:
+    """El callback de uso llega via config; si el agente revienta a mitad, los tokens ya
+    gastados igual quedan en el incidente."""
+    from agents.aiops import runtime
+
+    class AgenteQueGastaYFalla:
+        def invoke(self, entrada: dict[str, Any], config: dict[str, Any]) -> dict[str, Any]:
+            (cb,) = config["callbacks"]
+            cb.usage_metadata["modelo-x"] = {"input_tokens": 700, "output_tokens": 70}
+            raise RuntimeError("el LLM se cayo")
+
+    monkeypatch.setattr("app.main.build_agent", lambda: AgenteQueGastaYFalla())
+    alerta = Alerta("W2", "ServiceDown", "checkout", "dev", Severidad.ALTA, "caido")
+    try:
+        with pytest.raises(RuntimeError, match="se cayo"):
+            procesar_alerta_webhook(dataclasses.asdict(alerta), True)
+    finally:
+        runtime.reset()
+    inc = RepositorioIncidentesPostgres().obtener("INC-W2")
+    assert inc is not None and (inc.tokens_entrada, inc.tokens_salida) == (700, 70)

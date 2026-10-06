@@ -211,9 +211,7 @@ def test_aprobacion_de_un_incidente_no_sirve_para_otro() -> None:
 
     env2 = EntornoSimulado()
     alerta2 = env2.inyectar_fallo("otro-svc", "servicio_detenido")
-    ciclo2 = Ciclo(
-        env2, env2, Politica(nivel=NivelAutonomia.CON_APROBACION), Auditoria()
-    )
+    ciclo2 = Ciclo(env2, env2, Politica(nivel=NivelAutonomia.CON_APROBACION), Auditoria())
     inc2 = preparar(ciclo2, alerta2.id)
     ciclo2.ejecutar_remediacion(inc2, aprobada=False)
     with pytest.raises(ErrorCiclo, match="aprobacion registrada"):
@@ -532,8 +530,13 @@ def test_mttr_usa_disparada_en_cuando_esta_disponible() -> None:
     ciclo = Ciclo(env, env, politica, Auditoria(), reloj)
     alerta = env.inyectar_fallo("checkout", "servicio_detenido")
     alerta_con_disparo = Alerta(
-        alerta.id, alerta.nombre, alerta.servicio, alerta.entorno, alerta.severidad,
-        alerta.resumen, disparada_en=0.0,
+        alerta.id,
+        alerta.nombre,
+        alerta.servicio,
+        alerta.entorno,
+        alerta.severidad,
+        alerta.resumen,
+        disparada_en=0.0,
     )
     env._alertas[0] = alerta_con_disparo
     inc_id = preparar(ciclo, alerta.id)
@@ -619,6 +622,93 @@ def test_verificar_con_espera_se_rinde_al_agotar_la_ventana() -> None:
     assert 0 < len(dormidas) < 100  # se corto por la ventana, no por las lecturas
     with pytest.raises(ErrorCiclo, match="verificada"):
         ciclo.cerrar(inc_id)
+
+
+class _ObsSinDatosAlPrincipio(EntornoSimulado):
+    """Prometheus recien levantado (o tras una suspension): las primeras lecturas no
+    traen datos. Caso real de la Fase 4."""
+
+    def __init__(self, lecturas_sin_datos: int) -> None:
+        super().__init__()
+        self.lecturas = 0
+        self._sin_datos = lecturas_sin_datos
+        self.midiendo = False  # abrir() tambien lee la metrica: solo cuenta al confirmar
+
+    def metrica(self, servicio: str, nombre: str) -> float | None:
+        if not self.midiendo:
+            return super().metrica(servicio, nombre)
+        self.lecturas += 1
+        if self.lecturas <= self._sin_datos:
+            return None
+        return super().metrica(servicio, nombre)
+
+
+def _ciclo_confirmacion(env: EntornoSimulado, ventana: float) -> tuple[Ciclo, list[float]]:
+    dormidas: list[float] = []
+    ciclo = Ciclo(
+        env,
+        env,
+        Politica(nivel=NivelAutonomia.AUTONOMO_BAJO_RIESGO),
+        Auditoria(),
+        Reloj(),
+        confirmacion_ventana_s=ventana,
+        verificacion_intervalo_s=5,
+        dormir=dormidas.append,
+    )
+    return ciclo, dormidas
+
+
+def test_confirmar_reintenta_mientras_no_hay_datos() -> None:
+    env = _ObsSinDatosAlPrincipio(lecturas_sin_datos=2)
+    alerta = env.inyectar_fallo("checkout", "servicio_detenido")
+    ciclo, dormidas = _ciclo_confirmacion(env, ventana=60)
+    inc_id = ciclo.abrir(alerta.id).id
+    env.midiendo = True
+    confirmada, detalle = ciclo.confirmar_anomalia(inc_id)
+    assert confirmada and "anomalia confirmada" in detalle
+    assert env.lecturas == 3 and dormidas == [5, 5]
+
+
+def test_confirmar_no_reintenta_una_lectura_sana() -> None:
+    """Una lectura sana es evidencia (falso positivo): no se reintenta esperando que
+    aparezca la falla."""
+    env = _ObsSinDatosAlPrincipio(lecturas_sin_datos=0)
+    alerta = env.inyectar_fallo("checkout", "servicio_detenido")
+    ciclo, dormidas = _ciclo_confirmacion(env, ventana=60)
+    inc_id = ciclo.abrir(alerta.id).id
+    env.ejecutar("restart_service", "checkout", 1)  # se recupero antes de confirmar
+    env.midiendo = True
+    confirmada, _ = ciclo.confirmar_anomalia(inc_id)
+    assert not confirmada and dormidas == []
+
+
+def test_confirmar_sin_ventana_es_una_sola_lectura() -> None:
+    env = _ObsSinDatosAlPrincipio(lecturas_sin_datos=5)
+    alerta = env.inyectar_fallo("checkout", "servicio_detenido")
+    ciclo, dormidas = _ciclo_confirmacion(env, ventana=0)
+    inc_id = ciclo.abrir(alerta.id).id
+    env.midiendo = True
+    confirmada, detalle = ciclo.confirmar_anomalia(inc_id)
+    assert not confirmada and "insuficiente" in detalle and env.lecturas == 1
+
+
+def test_costo_llm_se_acumula_por_incidente_y_se_promedia() -> None:
+    """Fase 6, metrica de la tesis: tokens del LLM por incidente. Se acumula (un job
+    reintentado suma, no pisa) y el promedio solo cuenta incidentes donde corrio el LLM."""
+    ciclo, env, a1 = armar()
+    inc1 = ciclo.abrir(a1).id
+    ciclo.registrar_costo_llm(inc1, entrada=1000, salida=200)
+    ciclo.registrar_costo_llm(inc1, entrada=500, salida=100)  # reintento
+    inc2 = ciclo.abrir(env.inyectar_fallo("billing", "disco_lleno").id).id  # sin LLM
+    i1 = ciclo.incidente(inc1)
+    assert (i1.tokens_entrada, i1.tokens_salida) == (1500, 300)
+    assert metricas.tokens_por_incidente(ciclo.incidentes()) == pytest.approx(1800)
+    assert ciclo.incidente(inc2).tokens_entrada == 0
+    assert {e.tipo for e in ciclo.auditoria.de_incidente(inc1)} >= {"costo_llm"}
+    with pytest.raises(ErrorCiclo, match="negativ"):
+        ciclo.registrar_costo_llm(inc1, entrada=-1, salida=0)
+    with pytest.raises(ValueError):
+        metricas.tokens_por_incidente([ciclo.incidente(inc2)])
 
 
 def test_metricas_casos_borde() -> None:

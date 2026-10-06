@@ -219,6 +219,7 @@ def ver_metricas() -> dict[str, Any]:
         ("tra", metricas.tasa_resolucion_autonoma),
         ("mttr_segundos", metricas.mttr),
         ("tasa_rollback", metricas.tasa_rollback),
+        ("tokens_por_incidente", metricas.tokens_por_incidente),
     ):
         try:
             resultado[nombre] = fn(incidentes)
@@ -270,6 +271,12 @@ def metricas_prometheus() -> str:
     for (accion, ok), n in sorted(por_accion.items()):
         lineas.append(f'aiops_acciones_total{{accion="{accion}",ok="{str(ok).lower()}"}} {n}')
     lineas += _metrica_jobs_fallidos()
+    lineas += [
+        "# HELP aiops_tokens_llm_total Tokens del LLM gastados atendiendo incidentes.",
+        "# TYPE aiops_tokens_llm_total counter",
+        f'aiops_tokens_llm_total{{tipo="entrada"}} {sum(i.tokens_entrada for i in incidentes)}',
+        f'aiops_tokens_llm_total{{tipo="salida"}} {sum(i.tokens_salida for i in incidentes)}',
+    ]
     tra_help = "Tasa de resolucion autonoma (0 a 100)."
     for nombre, help_, fn in (
         ("aiops_tra_ratio", tra_help, metricas.tasa_resolucion_autonoma),

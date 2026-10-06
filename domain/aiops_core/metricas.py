@@ -42,6 +42,16 @@ def reduccion_mttr(mttr_base: float, mttr_agente: float) -> float:
     return 100 * (mttr_base - mttr_agente) / mttr_base
 
 
+def tokens_por_incidente(incidentes: Sequence[Incidente]) -> float:
+    """Tokens promedio (entrada + salida) por incidente, solo entre los que paso el LLM:
+    un incidente que el agente nunca vio no abarata el promedio."""
+    costos = [i.tokens_entrada + i.tokens_salida for i in incidentes]
+    con_llm = [c for c in costos if c > 0]
+    if not con_llm:
+        raise ValueError("Ningun incidente paso por el LLM: el costo no esta definido")
+    return sum(con_llm) / len(con_llm)
+
+
 def tasa_rollback(incidentes: Sequence[Incidente]) -> float:
     acciones: list[AccionEjecutada] = [a for i in incidentes for a in i.acciones]
     remediaciones = [a for a in acciones if not a.es_rollback]

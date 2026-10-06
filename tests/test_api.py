@@ -159,8 +159,11 @@ def test_resumen_trae_aprobacion_y_metrics_trae_acciones(cliente: TestClient) ->
     assert resumen["aprobacion"] == "aprobado"
     assert resumen["abierto_en"] > 0
 
+    ciclo.registrar_costo_llm(inc_id, entrada=900, salida=100)
     prom = cliente.get("/metrics").text
     assert 'aiops_acciones_total{accion="restart_service",ok="true"} 1' in prom
+    assert 'aiops_tokens_llm_total{tipo="entrada"} 900' in prom
+    assert cliente.get("/metricas", headers=HEADERS).json()["tokens_por_incidente"] == 1000
 
 
 def test_rotacion_de_token_sin_corte(monkeypatch: pytest.MonkeyPatch) -> None:

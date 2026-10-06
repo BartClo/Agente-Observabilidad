@@ -69,6 +69,9 @@ def _desde_dict(d: dict[str, Any]) -> Incidente:
         cerrado_en=d.get("cerrado_en"),
         motivo_escalamiento=d.get("motivo_escalamiento"),
         aprobacion=aprobacion,
+        # .get con default: las filas guardadas antes de la Fase 6 no tienen estos campos.
+        tokens_entrada=d.get("tokens_entrada", 0),
+        tokens_salida=d.get("tokens_salida", 0),
     )
 
 

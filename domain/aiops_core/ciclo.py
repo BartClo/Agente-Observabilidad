@@ -51,6 +51,7 @@ class Ciclo:
         verificacion_ventana_s: float = 0.0,
         verificacion_intervalo_s: float = 5.0,
         dormir: Callable[[float], None] = time.sleep,
+        confirmacion_ventana_s: float = 0.0,
     ) -> None:
         self._obs = observabilidad
         self._backend = backend
@@ -62,6 +63,8 @@ class Ciclo:
         self._ventana = verificacion_ventana_s
         self._intervalo = verificacion_intervalo_s
         self._dormir = dormir
+        # Fase 6: confirmar reintenta ante "sin datos" hasta esta ventana (0 = una lectura).
+        self._ventana_confirmacion = confirmacion_ventana_s
         # Default: en memoria, se pierde al reiniciar (igual que antes de la Fase 1).
         # infra.incidentes_postgres.RepositorioIncidentesPostgres sobrevive reinicios.
         self._repo = repositorio if repositorio is not None else RepositorioIncidentesMemoria()
@@ -161,7 +164,13 @@ class Ciclo:
             )
             return False, detalle
         senal = categoria.senal_sana
-        valor = self._obs.metrica(inc.alerta.servicio, senal.metrica)
+        # Reintenta solo mientras NO hay datos (p. ej. Prometheus sin scrapes recientes):
+        # una lectura sana ya es evidencia y no se espera a que aparezca la falla.
+        limite = self._reloj() + self._ventana_confirmacion
+        while (valor := self._obs.metrica(inc.alerta.servicio, senal.metrica)) is None:
+            if self._reloj() >= limite:
+                break
+            self._dormir(self._intervalo)
         if valor is None:
             detalle = f"sin datos de {senal.metrica}: evidencia insuficiente, escalar"
             confirmada = False
@@ -252,6 +261,17 @@ class Ciclo:
             incidente_id, "aprobacion", usuario=usuario, veredicto="rechazado", motivo=motivo
         )
         return self.escalar(incidente_id, f"aprobacion rechazada por {usuario}: {motivo}")
+
+    def registrar_costo_llm(self, incidente_id: str, *, entrada: int, salida: int) -> None:
+        """Suma (no reemplaza) los tokens que gasto el LLM en este incidente: un job
+        reintentado vuelve a gastar y tiene que contar."""
+        if entrada < 0 or salida < 0:
+            raise ErrorCiclo("los tokens no pueden ser negativos")
+        inc = self.incidente(incidente_id)
+        inc.tokens_entrada += entrada
+        inc.tokens_salida += salida
+        self._guardar(inc)
+        self.auditoria.registrar(incidente_id, "costo_llm", entrada=entrada, salida=salida)
 
     def revertir(self, incidente_id: str) -> ResultadoEjecucion:
         inc = self.incidente(incidente_id)
