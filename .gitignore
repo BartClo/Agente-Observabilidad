@@ -13,3 +13,6 @@ __pycache__/
 # Certificado autofirmado del laboratorio (Fase 3, escenario certificado_por_vencer):
 # se regenera, ver k8s-lab/README.md. Nunca commitear una clave privada, ni de prueba.
 docker/nginx/certs/
+
+# Token/CA del ServiceAccount del laboratorio (Fase 4): se extraen, no se commitean.
+k8s-lab/.secrets/

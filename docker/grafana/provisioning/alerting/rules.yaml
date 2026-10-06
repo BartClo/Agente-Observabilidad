@@ -32,7 +32,9 @@ groups:
           alertname: ServiceDown
           service: checkout
           env: dev
-          severity: critical
+          # alta, no critical: con critical la politica nunca deja actuar al agente
+          # (domain/aiops_core/politicas.py), y ServiceDown es un candidato L1.
+          severity: alta
         annotations:
           summary: "Servicio checkout caido (up < 1)"
         for: 10s
@@ -62,7 +64,7 @@ groups:
           alertname: PodFailed
           service: api
           env: dev
-          severity: critical
+          severity: alta
         annotations:
           summary: "Pod api en el cluster k3d no esta ready"
         for: 10s

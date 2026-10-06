@@ -1,7 +1,8 @@
 # Workload de prueba para el escenario `pod_fallido` del catalogo (ver
-# domain/aiops_core/catalogo.py). `make falla-pod` lo rompe de verdad (ver
-# scripts/fallas/pod_fallido.sh); `recreate_pod` (la accion autorizada) lo repone
-# borrando el pod fallido para que el Deployment lo recree sano.
+# domain/aiops_core/catalogo.py). Al arrancar crea /tmp/ok; el readinessProbe lo lee.
+# `make falla-pod` borra /tmp/ok dentro del pod -> el pod sigue existiendo pero queda
+# NotReady (kube_pod_status_ready{condition="true"} = 0). Es una falla que la accion
+# autorizada `recreate_pod` SI arregla: el pod nuevo arranca con /tmp/ok de nuevo.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -21,7 +22,13 @@ spec:
     spec:
       containers:
         - name: api
-          image: registry.k8s.io/pause:3.9
+          image: busybox:1.36
+          command: ["sh", "-c", "touch /tmp/ok && sleep 2147483647"]
+          readinessProbe:
+            exec:
+              command: ["cat", "/tmp/ok"]
+            periodSeconds: 2
+            failureThreshold: 1
           resources:
             requests:
               cpu: 10m

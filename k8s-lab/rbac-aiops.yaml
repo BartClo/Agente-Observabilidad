@@ -1,0 +1,48 @@
+# RBAC minimo del agente (Fase 4, decision 13 de docs/plan-aiops.md): solo lo que
+# exigen las acciones del catalogo, solo en el namespace del laboratorio.
+#   recreate_pod                      -> pods: list, delete (deletecollection)
+#   restart_service/restart_consumer  -> deployments: get, patch
+# Nada de exec, secrets, create, ni otros namespaces.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: aiops-agent
+  namespace: aiops-lab
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: aiops-agent
+  namespace: aiops-lab
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["list", "delete", "deletecollection"]
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: aiops-agent
+  namespace: aiops-lab
+subjects:
+  - kind: ServiceAccount
+    name: aiops-agent
+    namespace: aiops-lab
+roleRef:
+  kind: Role
+  name: aiops-agent
+  apiGroup: rbac.authorization.k8s.io
+---
+# Token de larga duracion para usar el ServiceAccount desde fuera del cluster (el
+# worker corre en docker compose, no como pod: ver k8s-lab/README.md).
+apiVersion: v1
+kind: Secret
+metadata:
+  name: aiops-agent-token
+  namespace: aiops-lab
+  annotations:
+    kubernetes.io/service-account.name: aiops-agent
+type: kubernetes.io/service-account-token

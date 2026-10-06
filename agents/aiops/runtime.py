@@ -47,8 +47,16 @@ def armar(*, persistencia: str | None = None) -> Ciclo:
         from infra.observabilidad import PrometheusLoki
 
         observabilidad = PrometheusLoki.desde_entorno()
-        # Sin backend real de acciones cableado: el agente observa, recomienda y escala.
-        backend = BackendDeshabilitado()
+        acciones = os.environ.get("AIOPS_ACTIONS", "ninguna")
+        if acciones == "k8s":
+            from infra.acciones_k8s import BackendKubernetes
+
+            backend = BackendKubernetes.desde_entorno()
+        elif acciones == "ninguna":
+            # Sin backend de acciones: el agente observa, recomienda y escala.
+            backend = BackendDeshabilitado()
+        else:
+            raise ValueError(f"AIOPS_ACTIONS desconocido: {acciones!r}")
     else:
         raise ValueError(f"AIOPS_BACKEND desconocido: {backend_nombre!r}")
 
@@ -77,7 +85,15 @@ def armar(*, persistencia: str | None = None) -> Ciclo:
             kill_switch=kill_switch_postgres(),
         )
     auditoria = Auditoria(Path(ruta) if ruta else None, on_evento=on_evento)
-    return Ciclo(observabilidad, backend, politica, auditoria, repositorio=repositorio)
+    return Ciclo(
+        observabilidad,
+        backend,
+        politica,
+        auditoria,
+        repositorio=repositorio,
+        verificacion_ventana_s=float(os.environ.get("AIOPS_VERIFY_WINDOW_S", "0")),
+        verificacion_intervalo_s=float(os.environ.get("AIOPS_VERIFY_INTERVAL_S", "5")),
+    )
 
 
 def get_ciclo() -> Ciclo:

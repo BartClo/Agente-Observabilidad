@@ -48,12 +48,20 @@ class Ciclo:
         auditoria: Auditoria,
         reloj: Callable[[], float] = time.time,
         repositorio: RepositorioIncidentes | None = None,
+        verificacion_ventana_s: float = 0.0,
+        verificacion_intervalo_s: float = 5.0,
+        dormir: Callable[[float], None] = time.sleep,
     ) -> None:
         self._obs = observabilidad
         self._backend = backend
         self.politica = politica
         self.auditoria = auditoria
         self._reloj = reloj
+        # Verificacion con espera (Fase 4): una accion real (recrear un pod) no recupera
+        # al instante. Ventana 0 = una sola lectura, igual que antes.
+        self._ventana = verificacion_ventana_s
+        self._intervalo = verificacion_intervalo_s
+        self._dormir = dormir
         # Default: en memoria, se pierde al reiniciar (igual que antes de la Fase 1).
         # infra.incidentes_postgres.RepositorioIncidentesPostgres sobrevive reinicios.
         self._repo = repositorio if repositorio is not None else RepositorioIncidentesMemoria()
@@ -260,7 +268,14 @@ class Ciclo:
         if not inc.acciones:
             raise ErrorCiclo("No se ejecuto ninguna accion: nada que verificar")
         senal = categoria.senal_sana
-        valor = self._obs.metrica(inc.alerta.servicio, senal.metrica)
+        limite = self._reloj() + self._ventana
+        lecturas = 0
+        while True:
+            valor = self._obs.metrica(inc.alerta.servicio, senal.metrica)
+            lecturas += 1
+            if (valor is not None and senal.cumple(valor)) or self._reloj() >= limite:
+                break
+            self._dormir(self._intervalo)
         if valor is None:
             detalle = f"sin datos de {senal.metrica}: recuperacion no comprobable"
             inc.verificado = False
@@ -270,7 +285,9 @@ class Ciclo:
                 "recuperado" if inc.verificado else "NO recuperado"
             )
         self._guardar(inc)
-        self.auditoria.registrar(incidente_id, "verificacion", ok=inc.verificado, detalle=detalle)
+        self.auditoria.registrar(
+            incidente_id, "verificacion", ok=inc.verificado, detalle=detalle, lecturas=lecturas
+        )
         return inc.verificado, detalle
 
     def cerrar(self, incidente_id: str) -> Incidente:

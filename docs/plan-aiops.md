@@ -186,16 +186,48 @@ Cada falla se recupera y la regla vuelve a `inactive` (verificado con disco).
 - Git Bash convierte argumentos `/path` a rutas de Windows; los scripts lo desactivan
   con `MSYS_NO_PATHCONV=1`.
 
-## Fase 4: Backend de acciones real (Kubernetes/k3d)
-- [ ] Implementar `BackendAcciones` en `infra/acciones_k8s.py` contra la API de
-      Kubernetes, con un **ServiceAccount in-cluster** (el `worker`/`app` corre dentro del
-      clúster k3d) y RBAC mínimo: solo `delete pod` y `rollout restart` en el namespace
-      del laboratorio. Sin kubeconfig externo que proteger fuera del clúster.
-- [ ] Respetar `timeout_s`, que no haya parámetros libres y validar el servicio (ya está en domain).
-- [ ] Cablearlo en `agents/aiops/runtime.py` con `AIOPS_BACKEND=prometheus` + `AIOPS_ACTIONS=k8s`.
-- [ ] Verificación con espera: `Ciclo.verificar` con sondeo (`intervalo`, `ventana`) y tests.
+## Fase 4: Backend de acciones real (Kubernetes/k3d) — ✅ cerrada 2026-10-06
+- [x] `infra/acciones_k8s.py` (`BackendKubernetes`): HTTP stdlib contra la API de
+      Kubernetes, sin dependencias nuevas. `recreate_pod` → borra pods `app=<servicio>`;
+      `restart_service`/`restart_consumer` → rollout restart del Deployment (anotación
+      del template, igual que `kubectl rollout restart`). `compress_old_logs`/
+      `restore_compressed_logs` no son operaciones de Kubernetes: fallan con
+      `RuntimeError` y el agente escala, sin inventar una equivalencia.
+- [x] RBAC mínimo (`k8s-lab/rbac-aiops.yaml`): `pods: list/delete/deletecollection` y
+      `deployments: get/patch`, solo en `aiops-lab`. **Verificado en vivo:** puede listar
+      pods de `aiops-lab`; recibe 403 en secrets y en otros namespaces.
+- [x] Respeta `timeout_s` (timeout del request HTTP); el namespace lo fija la
+      configuración, no el LLM; el servicio ya llega validado por el dominio. Un 403 del
+      RBAC sale como `RuntimeError` con el código (queda en el paquete de escalamiento).
+- [x] `AIOPS_ACTIONS=ninguna|k8s` en `agents/aiops/runtime.py` (con `AIOPS_BACKEND=prometheus`).
+- [x] Verificación con espera: `Ciclo(verificacion_ventana_s, verificacion_intervalo_s)`
+      sondea hasta recuperar o agotar la ventana (`AIOPS_VERIFY_WINDOW_S`/
+      `_INTERVAL_S`). Ventana 0 = una lectura, como antes. Tests con reloj/sueño falsos.
+- [x] Workload de `pod_fallido` rediseñado: readiness rota (borrar `/tmp/ok`) que **sí**
+      arregla la acción autorizada. El CrashLoop de la Fase 3 no servía para probar
+      remediación: recrear el pod no lo cura.
+- [x] `scripts/lab_ciclo.py`: el ciclo L1 completo sin LLM contra backends reales.
 
-**Criterio de cierre:** el agente reinicia de verdad un servicio del laboratorio y verifica su recuperación.
+**Desvío de la decisión 13 (in-cluster):** el worker sigue en docker compose y usa el
+token del ServiceAccount desde afuera. El límite de seguridad es el mismo (el RBAC lo
+impone el API server, no la ubicación del proceso); correr el worker como pod exige
+además un pipeline para importar la imagen a k3d, que no aporta a la tesis. El token
+vive en `k8s-lab/.secrets/` (ignorado por git).
+
+**Criterio de cierre: ✅ en vivo, sin mocks y sin LLM:**
+`pod_ready=0 (Prometheus) → anomalía confirmada → pod_fallido elegible → recreate_pod
+(API de Kubernetes, RBAC mínimo) → 15s de sondeo → pod_ready=1 → CERRADO
+resuelto_autonomo=True`, persistido en Postgres.
+
+**Hallazgos:**
+- Una primera corrida arrancó justo después de que la máquina se suspendiera: Prometheus
+  no tenía scrapes recientes, `pod_ready` vino vacío y el agente **escaló en vez de
+  actuar** (correcto: sin evidencia no ejecuta). `confirmar_anomalia` hace una sola
+  lectura; un reintento corto ante "sin datos" evitaría escalamientos espurios. Queda
+  como mejora menor, no se hizo.
+- Las reglas de laboratorio `ServiceDown` y `PodFailed` tenían `severity: critical`, y la
+  política nunca deja actuar al agente sobre severidad crítica. Bajadas a `alta`: son
+  candidatos L1. Sin este cambio, el pipeline real habría escalado siempre.
 
 ## Fase 5: UI integrada en Grafana
 - [ ] UI web servida por la API (`/ui`): lista de incidentes, línea de tiempo, botones

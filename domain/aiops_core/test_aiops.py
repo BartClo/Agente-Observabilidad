@@ -560,6 +560,67 @@ def test_repositorio_en_memoria_es_el_default_y_es_intercambiable() -> None:
     assert repo.listar() == [ciclo.incidente(inc_id)]
 
 
+class _ObsLenta(EntornoSimulado):
+    """La metrica 'up' recien vuelve a 1 despues de N lecturas: como un pod real que
+    tarda en quedar Ready despues de recrearlo (Fase 4)."""
+
+    def __init__(self, lecturas_hasta_sano: int) -> None:
+        super().__init__()
+        self.lecturas = 0
+        self._hasta = lecturas_hasta_sano
+
+    def metrica(self, servicio: str, nombre: str) -> float | None:
+        if nombre == "up" and self.acciones_ejecutadas:
+            self.lecturas += 1
+            return 1.0 if self.lecturas >= self._hasta else 0.0
+        return super().metrica(servicio, nombre)
+
+    def ejecutar(self, accion: str, servicio: str, timeout_s: int) -> str:
+        self.acciones_ejecutadas.append((accion, servicio))
+        return "ok (la recuperacion tarda)"
+
+
+def _ciclo_con_espera(env: EntornoSimulado, ventana: float) -> tuple[Ciclo, list[float]]:
+    dormidas: list[float] = []
+    reloj = Reloj()  # cada llamada avanza 10s
+    ciclo = Ciclo(
+        env,
+        env,
+        Politica(nivel=NivelAutonomia.AUTONOMO_BAJO_RIESGO),
+        Auditoria(),
+        reloj,
+        verificacion_ventana_s=ventana,
+        verificacion_intervalo_s=5,
+        dormir=dormidas.append,
+    )
+    return ciclo, dormidas
+
+
+def test_verificar_con_espera_sondea_hasta_recuperar() -> None:
+    env = _ObsLenta(lecturas_hasta_sano=3)
+    alerta = env.inyectar_fallo("checkout", "servicio_detenido")
+    ciclo, dormidas = _ciclo_con_espera(env, ventana=120)
+    inc_id = preparar(ciclo, alerta.id)
+    ciclo.ejecutar_remediacion(inc_id, aprobada=False)
+    ok, detalle = ciclo.verificar(inc_id)
+    assert ok and "recuperado" in detalle
+    assert env.lecturas == 3 and dormidas == [5, 5]  # 2 esperas entre 3 lecturas
+    assert ciclo.cerrar(inc_id).resuelto_autonomo
+
+
+def test_verificar_con_espera_se_rinde_al_agotar_la_ventana() -> None:
+    env = _ObsLenta(lecturas_hasta_sano=100)
+    alerta = env.inyectar_fallo("checkout", "servicio_detenido")
+    ciclo, dormidas = _ciclo_con_espera(env, ventana=30)
+    inc_id = preparar(ciclo, alerta.id)
+    ciclo.ejecutar_remediacion(inc_id, aprobada=False)
+    ok, detalle = ciclo.verificar(inc_id)
+    assert not ok and "NO recuperado" in detalle
+    assert 0 < len(dormidas) < 100  # se corto por la ventana, no por las lecturas
+    with pytest.raises(ErrorCiclo, match="verificada"):
+        ciclo.cerrar(inc_id)
+
+
 def test_metricas_casos_borde() -> None:
     with pytest.raises(ValueError):
         metricas.tasa_resolucion_autonoma([])
