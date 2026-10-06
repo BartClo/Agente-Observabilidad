@@ -15,6 +15,7 @@ de un `Ciclo` que corra con `AIOPS_PERSISTENCIA=postgres` (ver runtime.py): en m
 from __future__ import annotations
 
 import dataclasses
+import hmac
 import os
 from pathlib import Path
 from typing import Annotated, Any
@@ -34,10 +35,15 @@ app = FastAPI(title="aiops API")
 
 
 def requiere_token(authorization: Annotated[str | None, Header()] = None) -> None:
-    token = os.environ.get("AIOPS_API_TOKEN", "").strip()
-    if not token:
+    """AIOPS_API_TOKEN acepta varios tokens separados por coma: para rotar sin corte se
+    agrega el nuevo, se actualizan los clientes (contact point de Grafana, operadores)
+    y recien despues se quita el viejo. Comparacion en tiempo constante (hmac)."""
+    validos = [t.strip() for t in os.environ.get("AIOPS_API_TOKEN", "").split(",") if t.strip()]
+    if not validos:
         raise HTTPException(500, "AIOPS_API_TOKEN no configurado")
-    if authorization != f"Bearer {token}":
+    recibido = (authorization or "").encode()
+    # Recorre todos sin cortar al primero que coincide: no filtra cual token es.
+    if not any([hmac.compare_digest(recibido, f"Bearer {t}".encode()) for t in validos]):
         raise HTTPException(401, "token invalido o ausente")
 
 

@@ -161,3 +161,15 @@ def test_resumen_trae_aprobacion_y_metrics_trae_acciones(cliente: TestClient) ->
 
     prom = cliente.get("/metrics").text
     assert 'aiops_acciones_total{accion="restart_service",ok="true"} 1' in prom
+
+
+def test_rotacion_de_token_sin_corte(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Fase 6: AIOPS_API_TOKEN acepta varios tokens separados por coma, para rotar
+    sin cortar (viejo y nuevo validos mientras se actualiza el contact point de
+    Grafana). Un token vacio en la lista nunca autentica."""
+    monkeypatch.setenv("AIOPS_API_TOKEN", "viejo, nuevo,")
+    c = TestClient(app)
+    for token, esperado in (("viejo", 200), ("nuevo", 200), ("otro", 401), ("", 401)):
+        r = c.get("/kill-switch", headers={"Authorization": f"Bearer {token}"})
+        assert r.status_code == esperado, token
+    assert c.get("/kill-switch", headers={"Authorization": "viejo"}).status_code == 401
