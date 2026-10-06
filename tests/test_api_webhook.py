@@ -63,6 +63,11 @@ def test_webhook_encola_un_job_por_alerta() -> None:
     assert job is not None
     assert job.get_status() == "queued"
     assert job.args[1] is True  # es_firing
+    # Fase 6: timeout, reintentos con espera y retencion en la cola de fallidos.
+    assert job.timeout == 900
+    assert job.retries_left == 2 and job.retry_intervals == [30, 120]
+    assert job.failure_ttl == 7 * 86400
+    assert "aiops_jobs_fallidos 0" in TestClient(app).get("/metrics").text
 
 
 def test_webhook_sin_token_rechaza() -> None:

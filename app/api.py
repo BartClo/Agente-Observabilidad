@@ -82,6 +82,8 @@ def webhook_grafana(payload: dict[str, Any]) -> dict[str, Any]:
     import dataclasses as dc
     import re
 
+    from rq import Retry
+
     from infra.queue import get_queue
 
     etiqueta = os.environ.get("AIOPS_SERVICE_LABEL", "service")
@@ -103,6 +105,13 @@ def webhook_grafana(payload: dict[str, Any]) -> dict[str, Any]:
             dc.asdict(alerta),
             es_firing,
             job_id=job_id,
+            # Fase 6: un job colgado (LLM sin responder) no bloquea al worker para
+            # siempre; uno que falla (servicio ocupado, red) se reintenta con espera
+            # creciente; agotados los reintentos queda en el FailedJobRegistry de RQ
+            # (cola de fallidos) por AIOPS_JOB_FALLIDOS_TTL_S para revisarlo.
+            job_timeout=int(os.environ.get("AIOPS_JOB_TIMEOUT_S", "900")),
+            retry=Retry(max=int(os.environ.get("AIOPS_JOB_REINTENTOS", "2")), interval=[30, 120]),
+            failure_ttl=int(os.environ.get("AIOPS_JOB_FALLIDOS_TTL_S", str(7 * 86400))),
         )
         encolados.append(alerta.id)
     return {"encolados": encolados, "deduplicados": deduplicados}
@@ -218,6 +227,24 @@ def ver_metricas() -> dict[str, Any]:
     return resultado
 
 
+def _metrica_jobs_fallidos() -> list[str]:
+    """Tamano de la cola de fallidos del worker (Fase 6). Sin Redis (profile no
+    levantado) se omite: /metrics no debe caerse por un componente opcional."""
+    try:
+        from rq.registry import FailedJobRegistry
+
+        from infra.queue import get_queue
+
+        n = len(FailedJobRegistry(queue=get_queue("aiops")))
+    except Exception:
+        return []
+    return [
+        "# HELP aiops_jobs_fallidos Jobs del worker que agotaron sus reintentos.",
+        "# TYPE aiops_jobs_fallidos gauge",
+        f"aiops_jobs_fallidos {n}",
+    ]
+
+
 @app.get("/metrics", response_class=PlainTextResponse)
 def metricas_prometheus() -> str:
     """Formato de exposicion de Prometheus (no requiere token: es lo que el propio
@@ -242,6 +269,7 @@ def metricas_prometheus() -> str:
             por_accion[(a.nombre, a.ok)] = por_accion.get((a.nombre, a.ok), 0) + 1
     for (accion, ok), n in sorted(por_accion.items()):
         lineas.append(f'aiops_acciones_total{{accion="{accion}",ok="{str(ok).lower()}"}} {n}')
+    lineas += _metrica_jobs_fallidos()
     tra_help = "Tasa de resolucion autonoma (0 a 100)."
     for nombre, help_, fn in (
         ("aiops_tra_ratio", tra_help, metricas.tasa_resolucion_autonoma),

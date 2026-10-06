@@ -10,6 +10,7 @@ from __future__ import annotations
 import dataclasses
 import os
 from collections.abc import Iterator
+from typing import Any
 
 import psycopg
 import pytest
@@ -23,7 +24,7 @@ from infra.incidentes_postgres import RepositorioIncidentesPostgres
 def _limpiar() -> Iterator[None]:
     yield
     with psycopg.connect(os.environ["DATABASE_URL"], autocommit=True) as conn:
-        conn.execute("DELETE FROM aiops_incidentes WHERE id = 'INC-W1'")
+        conn.execute("DELETE FROM aiops_incidentes WHERE id IN ('INC-W1', 'INC-W2')")
 
 
 def test_resolved_audita_sin_abrir_incidente() -> None:
@@ -31,3 +32,60 @@ def test_resolved_audita_sin_abrir_incidente() -> None:
     resultado = procesar_alerta_webhook(dataclasses.asdict(alerta), False)
     assert "auditada" in resultado
     assert RepositorioIncidentesPostgres().obtener("INC-W1") is None  # nunca se abrio nada
+
+
+def _redis_disponible() -> bool:
+    try:
+        from infra.redis_client import get_redis
+
+        return bool(get_redis().ping())
+    except Exception:
+        return False
+
+
+requiere_redis = pytest.mark.skipif(not _redis_disponible(), reason="profile redis no levantado")
+
+
+@requiere_redis
+def test_firing_las_tools_del_agente_ven_el_incidente(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Bug de la Fase 3 encontrado en la Fase 6: el worker abria el incidente en un Ciclo
+    Postgres, pero las tools del agente usan runtime.get_ciclo() (otro Ciclo, en
+    memoria) y respondian 'no existe'. Sin LLM: un agente falso llama a las tools
+    REALES, como haria el LLM, y tienen que encontrar el incidente."""
+    import re
+
+    from agents.aiops import runtime, tools
+
+    vistos: list[str] = []
+
+    class AgenteFalso:
+        def invoke(self, entrada: dict[str, Any]) -> dict[str, Any]:
+            pedido = entrada["messages"][0]["content"]
+            inc_id = re.search(r"incidente (\S+) \(", pedido).group(1)  # type: ignore[union-attr]
+            vistos.append(tools.estado_incidente(inc_id))
+            return {"messages": []}
+
+    monkeypatch.setattr("app.main.build_agent", lambda: AgenteFalso())
+    alerta = Alerta("W2", "ServiceDown", "checkout", "dev", Severidad.ALTA, "caido")
+    try:
+        procesar_alerta_webhook(dataclasses.asdict(alerta), True)
+    finally:
+        runtime.reset()
+    assert len(vistos) == 1
+    assert not vistos[0].startswith("ERROR"), vistos[0]
+    assert "INC-W2" in vistos[0]
+
+
+@requiere_redis
+def test_lock_un_incidente_por_servicio_a_la_vez(monkeypatch: pytest.MonkeyPatch) -> None:
+    from agents.aiops.worker_jobs import ServicioOcupado, bloqueo_servicio
+
+    monkeypatch.setenv("AIOPS_LOCK_ESPERA_S", "0.2")
+    with bloqueo_servicio("svc-lock-test"):
+        with pytest.raises(ServicioOcupado):
+            with bloqueo_servicio("svc-lock-test"):
+                pass  # pragma: no cover
+        with bloqueo_servicio("otro-servicio"):  # otro servicio no se bloquea
+            pass
+    with bloqueo_servicio("svc-lock-test"):  # liberado al salir
+        pass

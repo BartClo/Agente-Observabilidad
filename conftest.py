@@ -1,4 +1,4 @@
-"""Aisla los tests de la base del laboratorio (Fase 6).
+"""Aisla los tests de la base y la cola del laboratorio (Fase 6).
 
 Los tests de integracion limpian sus tablas al terminar (`DELETE FROM aiops_*`). Antes
 corrian contra la MISMA base que el laboratorio (DATABASE_URL), asi que `make test` con
@@ -45,4 +45,20 @@ def _preparar_base_de_tests() -> None:
     command.upgrade(Config(os.path.join(os.path.dirname(__file__), "alembic.ini")), "head")
 
 
+def _aislar_redis() -> None:
+    """Mismo problema que con Postgres: tests/test_api_webhook.py vacia la cola `aiops`
+    al terminar, y era la misma cola del laboratorio. Los tests usan otra base logica de
+    Redis (la /15, o TEST_REDIS_URL)."""
+    original = os.environ.get("REDIS_URL")
+    if not original:
+        return
+    destino = os.environ.get("TEST_REDIS_URL") or urllib.parse.urlunsplit(
+        urllib.parse.urlsplit(original)._replace(path="/15")
+    )
+    if destino == original:
+        raise RuntimeError("La base de Redis de tests no puede ser la misma que REDIS_URL")
+    os.environ["REDIS_URL"] = destino
+
+
 _preparar_base_de_tests()
+_aislar_redis()
