@@ -61,6 +61,9 @@ cp -r agents/_template agents/mi-agente
 | [`docs/architecture.md`](docs/architecture.md) | Componentes, flujo de un pedido, reglas del framework |
 | [`docs/creating-an-agent.md`](docs/creating-an-agent.md) | Cómo crear y probar un agente |
 | [`docs/aiops-agent.md`](docs/aiops-agent.md) | Agente AIOps para incidentes L1 (tesis) |
+| [`docs/plan-aiops.md`](docs/plan-aiops.md) | Plan por fases, decisiones y estado verificado |
+| [`docs/runbook-operacion.md`](docs/runbook-operacion.md) | Operar el agente: kill switch, aprobaciones, rotación de credenciales, fallas |
+| [`k8s-lab/README.md`](k8s-lab/README.md) | Laboratorio k3d y cómo correr el ciclo contra él |
 | [`docs/open-questions.md`](docs/open-questions.md) | Cosas sin verificar contra fuente oficial |
 | [`rag/README.md`](rag/README.md), [`infra/README.md`](infra/README.md), [`domain/README.md`](domain/README.md) | Detalle por componente |
 
@@ -70,6 +73,8 @@ Python 3.12 · deepagents 0.7.19 · Postgres + pgvector · Docker Compose · ruf
 
 ## Estado
 
-Etapa temprana. `app/main.py` todavía no expone HTTP (endpoint FastAPI pendiente),
-por lo que el servicio `traefik` no es útil aún. El agente `cotizador` es un ejemplo
-con valores `PLACEHOLDER`, no un producto real.
+El agente `aiops` (tesis) tiene implementadas y probadas las fases 0 a 6 de
+`docs/plan-aiops.md`: API HTTP (`app/api.py`), persistencia en Postgres, laboratorio
+de observabilidad real, acciones sobre Kubernetes y UI embebida en Grafana. Falta
+probarlo con el LLM real y la evaluación de la tesis (Fase 7). El agente `cotizador`
+es un ejemplo con valores `PLACEHOLDER`, no un producto real.

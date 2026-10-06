@@ -273,13 +273,34 @@ dashboard carga con sus 6 paneles y que Prometheus scrapea la API.
 navegador (`decision: aprobado por marcelo`) y el ciclo recreo el pod, verifico y
 cerro con `resuelto_autonomo=False`.
 
-## Fase 6: Endurecimiento y operación
-- [ ] Langfuse (profile ya existente) o métricas propias para el costo de tokens por incidente (métrica de la tesis).
-- [ ] Límite de concurrencia: un incidente por servicio a la vez (lock en Redis).
-- [ ] Reintentos y timeouts del worker, y una cola de mensajes fallidos.
-- [ ] Revisión de seguridad: secretos fuera del repo, `AIOPS_API_TOKEN` rotable y
-      principio de mínimo privilegio verificado (RBAC del ServiceAccount de la Fase 4).
-- [ ] README y `docs/aiops-agent.md` actualizados, incluido un runbook de operación del propio agente.
+## Fase 6: Endurecimiento y operación — ✅ cerrada 2026-10-06
+- [x] **Costo en tokens por incidente** (métrica de la tesis), con métricas propias (no
+      Langfuse: su receta v2 sigue sin verificar, ver `open-questions.md`).
+      `UsageMetadataCallbackHandler` suma todas las llamadas de la corrida, incluido el
+      subagente; se registra aunque el agente falle. `/metricas` y
+      `aiops_tokens_llm_total`. **Sin API key no se midió un costo real.**
+- [x] **Un incidente por servicio a la vez**: lock en Redis con TTL (`bloqueo_servicio`).
+- [x] **Worker**: `job_timeout`, `Retry(2, [30s, 120s])`, cola de fallidos (FailedJobRegistry,
+      7 días) y métrica `aiops_jobs_fallidos`.
+- [x] **Seguridad**: token de la API comparado en tiempo constante (`hmac`) y rotable sin
+      corte (varios tokens separados por coma). Revisión de secretos sobre todo el
+      historial de git: nunca se commitearon `.env`, claves, tokens ni certificados.
+      Mínimo privilegio del ServiceAccount verificado en la Fase 4 (403 fuera de lo
+      permitido).
+- [x] **Docs**: `docs/runbook-operacion.md` (operar el agente), README y
+      `docs/aiops-agent.md` actualizados.
+
+**Bugs reales encontrados y corregidos en esta fase:**
+1. **Los tests borraban el laboratorio**: usaban la misma base de Postgres y la misma
+   cola de Redis. Ahora `conftest.py` los redirige a `<base>_test` y a la base `/15` de
+   Redis. Verificado: un incidente y un job testigo del laboratorio sobreviven a la suite.
+2. **Las tools del agente no veían el incidente** (introducido en la Fase 3): el worker
+   lo abría en un `Ciclo` Postgres y las tools usaban otro `Ciclo` en memoria; el LLM
+   habría recibido "no existe" en cada tool. Nunca se vio porque el LLM no corrió.
+   Test con un agente falso que llama a las tools reales; falla sin el arreglo.
+3. **Escalamiento espurio sin datos** (visto en la Fase 4): `confirmar_anomalia` ahora
+   reintenta solo mientras la métrica no trae datos (`AIOPS_CONFIRM_WINDOW_S`).
+4. El healthcheck de Postgres llenaba el log de `FATAL` cada 2s (faltaba `-d`).
 
 ## Fase 7: Evaluación de la tesis
 - [ ] Línea base: atender los mismos escenarios a mano (o con datos históricos) midiendo

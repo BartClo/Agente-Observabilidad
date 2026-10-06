@@ -73,21 +73,28 @@ cablearlo en `agents/aiops/runtime.py`.
 
 ## Estado (ver docs/plan-aiops.md para el detalle fase por fase)
 
-Fases 0, 0.5, 1 y 2 completas. El agente tiene: persistencia en Postgres
-(`AIOPS_PERSISTENCIA=postgres`), un webhook (`POST /webhooks/grafana`) que encola en
-RQ, endpoints de incidentes/aprobación/kill switch/métricas, y el checkpointer de
-LangGraph instalado (sin cablear a `create_deep_agent` todavía).
+Fases 0 a 6 completas, probadas contra un laboratorio real (Prometheus, Grafana,
+RabbitMQ, k3d). El agente:
+
+- recibe alertas de Grafana por webhook, las encola en RQ y las atiende un worker con
+  lock por servicio, reintentos, timeout y cola de fallidos;
+- persiste incidentes y auditoría en Postgres;
+- actúa sobre Kubernetes con un ServiceAccount de RBAC mínimo (`AIOPS_ACTIONS=k8s`) y
+  verifica la recuperación sondeando (`AIOPS_VERIFY_WINDOW_S`);
+- pide aprobación humana en nivel 2 desde una UI embebida en Grafana (`/ui`);
+- mide TRA, MTTR y el costo en tokens por incidente (`/metricas`, `/metrics`).
+
+Operación: `docs/runbook-operacion.md`.
 
 ## Pendiente
 
-- UI embebible en Grafana (Fase 5).
-- Backend de acciones real sobre Kubernetes/k3d (Fase 4).
-- Laboratorio de observabilidad real: Prometheus/Loki/Grafana/RabbitMQ (Fase 3).
-- Cablear el checkpointer a `create_deep_agent`/`Command(resume=...)`: instalado y
-  probado (Fase 1), pero reanudar un grafo pausado de verdad necesita un
-  `ANTHROPIC_API_KEY` real para probarse, no disponible en las sesiones hasta ahora.
-- Verificar en vivo que el worker (`agents/aiops/worker_jobs.py`) resuelve un
-  incidente de punta a punta con el LLM real (mismo motivo: falta la API key).
-- Verificación con espera y reintentos (hoy hace una sola lectura).
-- Línea base de MTTR con datos reales y validación del catálogo L1 con operaciones.
-- Medición del costo en tokens.
+- **Probar el agente con el LLM real.** Todas las corridas de punta a punta se hicieron
+  con `scripts/lab_ciclo.py`, que recorre el ciclo con un diagnóstico fijo. El código
+  que invoca al LLM está cableado y probado con un agente falso, pero nunca corrió con
+  `ANTHROPIC_API_KEY`. Es condición para que la evaluación (Fase 7) mida al agente y no
+  al script.
+- Cablear el checkpointer a `create_deep_agent`/`Command(resume=...)`: hoy la pausa de
+  nivel 2 se resuelve por el estado en Postgres, no reanudando el grafo de LangGraph.
+- Fase 7: línea base de MTTR, corridas repetidas por categoría y contraste de H1–H3.
+- Validar el catálogo L1 y los runbooks con operaciones (siguen siendo candidatos de
+  diseño).

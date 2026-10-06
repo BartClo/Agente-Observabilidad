@@ -28,7 +28,9 @@ services:
       - postgres_data:/var/lib/postgresql/data
       - ./docker/postgres-init:/docker-entrypoint-initdb.d:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-agent}"]
+      # -d explicito: sin el, pg_isready se conecta a una base con el nombre del usuario
+      # ("agent", que no existe) y llena el log de FATAL cada 2s.
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-agent} -d ${POSTGRES_DB:-agents}"]
       interval: 2s
       timeout: 3s
       retries: 20
