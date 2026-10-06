@@ -9,16 +9,13 @@ global:
   evaluation_interval: 5s
 
 scrape_configs:
-  # servicio_detenido: up=0 cuando el contenedor "checkout" no responde. nginx no
-  # expone /metrics (el path por defecto de Prometheus): se scrapea "/" (200 por
-  # defecto en nginx) para que up=1 mientras el servicio este sano.
+  # servicio_detenido: Deployment "checkout" en k3d (k8s-lab/workload-checkout.yaml),
+  # expuesto por NodePort 30081. up=0 cuando httpd no responde. Vive en k3d (no en
+  # compose) para que la accion restart_service del agente lo pueda arreglar.
   - job_name: checkout
-    # nginx sirve docker/nginx/metrics.txt como archivo estatico en /metrics (ver
-    # volumes del servicio checkout): contenido valido para Prometheus, no mide
-    # nada real -- solo importa que nginx responda (up=1) o no (up=0).
     fallback_scrape_protocol: PrometheusText0.0.4
     static_configs:
-      - targets: ["checkout:80"]
+      - targets: ["host.docker.internal:30081"]
         labels: {service: checkout, env: dev}
 
   # pod_fallido: kube-state-metrics del cluster k3d (ver k8s-lab/), expuesto al host

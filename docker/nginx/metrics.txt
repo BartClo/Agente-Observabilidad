@@ -1,6 +1,0 @@
-# Placeholder para que Prometheus tenga algo valido que parsear en /metrics. No
-# mide nada del servicio: lo unico que importa para `servicio_detenido` es que
-# nginx responda (up=1) o no (up=0), no el contenido.
-# HELP checkout_up Placeholder: siempre 1 si nginx responde.
-# TYPE checkout_up gauge
-checkout_up 1

@@ -131,6 +131,11 @@ def _resumen(inc: Incidente) -> dict[str, Any]:
         "intervencion_humana": inc.intervencion_humana,
         "aprobacion": inc.aprobacion.veredicto if inc.aprobacion else None,
         "abierto_en": inc.abierto_en,
+        # Fase 7: lo que necesita scripts/experimento.py para medir MTTR y costo.
+        "disparada_en": inc.alerta.disparada_en,
+        "cerrado_en": inc.cerrado_en,
+        "tokens_entrada": inc.tokens_entrada,
+        "tokens_salida": inc.tokens_salida,
     }
 
 

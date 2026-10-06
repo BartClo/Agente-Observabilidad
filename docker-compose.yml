@@ -164,15 +164,6 @@ services:
       - prometheus
     profiles: ["observability"]
 
-  # Simula el servicio del escenario `servicio_detenido` del catalogo. `up{job=...}`
-  # (metrica nativa de Prometheus) hace de senal: parar este contenedor alcanza para
-  # que la alerta ServiceDown se dispare, sin instrumentar nada.
-  checkout:
-    image: nginx:1.27-alpine
-    volumes:
-      - ./docker/nginx/metrics.txt:/usr/share/nginx/html/metrics:ro
-    profiles: ["observability"]
-
   # Escenario `cola_detenida`: plugin rabbitmq_prometheus (metrica nativa
   # rabbitmq_queue_consumers, la misma que ya asume infra/observabilidad.py).
   rabbitmq:

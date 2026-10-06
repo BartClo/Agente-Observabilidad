@@ -1,0 +1,3 @@
+categoria,mttr_s,accion_incorrecta,operador,notas
+pod_fallido,420,false,ejemplo,VALORES DE EJEMPLO: reemplazar por mediciones reales (ver docs/protocolo-experimento.md)
+servicio_detenido,380,false,ejemplo,VALORES DE EJEMPLO
