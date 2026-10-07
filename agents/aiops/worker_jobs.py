@@ -95,7 +95,7 @@ def atender_con_agente(ciclo: Ciclo, incidente_id: str, alerta: Alerta) -> None:
 
     from langchain_core.callbacks import UsageMetadataCallbackHandler
 
-    from app.main import build_agent
+    from app.main import ORCHESTRATOR_MODEL, build_agent, modelo_de_la_ui
 
     pedido = (
         f"Atiende el incidente {incidente_id} (alerta {alerta.nombre} en {alerta.servicio}, "
@@ -104,17 +104,19 @@ def atender_con_agente(ciclo: Ciclo, incidente_id: str, alerta: Alerta) -> None:
     # El callback suma el uso de TODAS las llamadas al LLM de la corrida, incluidas las
     # del subagente aiops dentro de su tool call: contar solo los mensajes finales del
     # orquestador subestimaria el costo (Fase 6).
+    # Modelo elegido desde la UI (si hay); si no, el de agent.yaml / ORCHESTRATOR_MODEL.
+    activo = modelo_de_la_ui()
+    modelo, etiqueta = activo if activo else (None, f"default:{ORCHESTRATOR_MODEL}")
     uso = UsageMetadataCallbackHandler()
     try:
-        build_agent().invoke(
+        build_agent(modelo).invoke(
             {"messages": [{"role": "user", "content": pedido}]},
             config={"callbacks": [uso]},
         )
     finally:
         # Tambien si el agente fallo a mitad: los tokens gastados igual cuestan.
         entrada, salida = tokens_de(uso.usage_metadata)
-        if entrada or salida:
-            ciclo.registrar_costo_llm(incidente_id, entrada=entrada, salida=salida)
+        ciclo.registrar_costo_llm(incidente_id, entrada=entrada, salida=salida, modelo=etiqueta)
 
 
 def tokens_de(uso_por_modelo: dict[str, Any]) -> tuple[int, int]:

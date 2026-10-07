@@ -47,9 +47,7 @@ def _load_skills(agent_dir: Path, skills_field: str | None) -> list[str]:
     skills_dir = agent_dir / skills_field
     if not skills_dir.is_dir():
         return []
-    return sorted(
-        str(p.parent) for p in skills_dir.glob("*/SKILL.md")
-    )
+    return sorted(str(p.parent) for p in skills_dir.glob("*/SKILL.md"))
 
 
 def _build_rag_tool(rag_field: dict[str, Any]) -> Callable[[str], str]:
@@ -73,7 +71,7 @@ def _build_rag_tool(rag_field: dict[str, Any]) -> Callable[[str], str]:
     return buscar_documentos
 
 
-def _build_subagent(agent_dir: Path) -> SubAgent:
+def _build_subagent(agent_dir: Path, modelo_override: Any = None) -> SubAgent:
     config_path = agent_dir / "agent.yaml"
     config = yaml.safe_load(config_path.read_text())
 
@@ -96,6 +94,9 @@ def _build_subagent(agent_dir: Path) -> SubAgent:
     }
     if "model" in config:
         subagent["model"] = config["model"]
+    if modelo_override is not None:
+        # Modelo elegido desde la UI (infra/llm_config.py): pisa el de agent.yaml.
+        subagent["model"] = modelo_override
     if skills:
         subagent["skills"] = skills
     if require_approval:
@@ -103,7 +104,7 @@ def _build_subagent(agent_dir: Path) -> SubAgent:
     return subagent
 
 
-def load_subagents() -> list[SubAgent]:
+def load_subagents(modelo_override: Any = None) -> list[SubAgent]:
     """Un `SubAgent` por cada `agents/<nombre>/agent.yaml`, salvo `_template`."""
     subagents = []
     for agent_dir in sorted(AGENTS_DIR.iterdir()):
@@ -111,5 +112,5 @@ def load_subagents() -> list[SubAgent]:
             continue
         if not (agent_dir / "agent.yaml").exists():
             continue
-        subagents.append(_build_subagent(agent_dir))
+        subagents.append(_build_subagent(agent_dir, modelo_override))
     return subagents

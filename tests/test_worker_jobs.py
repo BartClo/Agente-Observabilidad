@@ -65,7 +65,7 @@ def test_firing_las_tools_del_agente_ven_el_incidente(monkeypatch: pytest.Monkey
             vistos.append(tools.estado_incidente(inc_id))
             return {"messages": []}
 
-    monkeypatch.setattr("app.main.build_agent", lambda: AgenteFalso())
+    monkeypatch.setattr("app.main.build_agent", lambda *a: AgenteFalso())
     alerta = Alerta("W2", "ServiceDown", "checkout", "dev", Severidad.ALTA, "caido")
     try:
         procesar_alerta_webhook(dataclasses.asdict(alerta), True)
@@ -115,7 +115,7 @@ def test_firing_registra_tokens_aunque_el_agente_falle(monkeypatch: pytest.Monke
             cb.usage_metadata["modelo-x"] = {"input_tokens": 700, "output_tokens": 70}
             raise RuntimeError("el LLM se cayo")
 
-    monkeypatch.setattr("app.main.build_agent", lambda: AgenteQueGastaYFalla())
+    monkeypatch.setattr("app.main.build_agent", lambda *a: AgenteQueGastaYFalla())
     alerta = Alerta("W2", "ServiceDown", "checkout", "dev", Severidad.ALTA, "caido")
     try:
         with pytest.raises(RuntimeError, match="se cayo"):
@@ -124,3 +124,5 @@ def test_firing_registra_tokens_aunque_el_agente_falle(monkeypatch: pytest.Monke
         runtime.reset()
     inc = RepositorioIncidentesPostgres().obtener("INC-W2")
     assert inc is not None and (inc.tokens_entrada, inc.tokens_salida) == (700, 70)
+    # sin modelo elegido en la UI queda registrado el default
+    assert inc.modelo_llm is not None and inc.modelo_llm.startswith("default:")

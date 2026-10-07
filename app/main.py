@@ -21,17 +21,28 @@ improvisar una respuesta.
 """
 
 
-def build_agent() -> Any:
+def modelo_de_la_ui() -> tuple[Any, str] | None:
+    """(modelo, "proveedor:modelo") elegido desde la UI (infra/llm_config.py), o None si
+    no hay uno elegido o no hay base de datos: en ese caso se usa el modelo por defecto."""
+    if not os.environ.get("DATABASE_URL"):
+        return None
+    from infra.llm_config import modelo_activo
+
+    return modelo_activo()
+
+
+def build_agent(modelo: Any = None) -> Any:
+    """`modelo`: un BaseChatModel ya armado (p. ej. el de modelo_de_la_ui()). Lo usan el
+    orquestador y todos los subagentes. Sin modelo, cada uno usa el suyo por defecto
+    (ORCHESTRATOR_MODEL y el `model` de cada agent.yaml), como antes."""
     return create_deep_agent(
-        model=ORCHESTRATOR_MODEL,
+        model=modelo or ORCHESTRATOR_MODEL,
         system_prompt=ORCHESTRATOR_PROMPT,
-        subagents=load_subagents(),
+        subagents=load_subagents(modelo_override=modelo),
     )
 
 
 if __name__ == "__main__":
     agent = build_agent()
-    result = agent.invoke(
-        {"messages": [{"role": "user", "content": "hola, quien sos?"}]}
-    )
+    result = agent.invoke({"messages": [{"role": "user", "content": "hola, quien sos?"}]})
     print(result["messages"][-1].content)

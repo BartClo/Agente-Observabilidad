@@ -262,16 +262,23 @@ class Ciclo:
         )
         return self.escalar(incidente_id, f"aprobacion rechazada por {usuario}: {motivo}")
 
-    def registrar_costo_llm(self, incidente_id: str, *, entrada: int, salida: int) -> None:
+    def registrar_costo_llm(
+        self, incidente_id: str, *, entrada: int, salida: int, modelo: str | None = None
+    ) -> None:
         """Suma (no reemplaza) los tokens que gasto el LLM en este incidente: un job
-        reintentado vuelve a gastar y tiene que contar."""
+        reintentado vuelve a gastar y tiene que contar. `modelo` ("proveedor:modelo")
+        queda registrado: comparar corridas exige saber que modelo atendio cada una."""
         if entrada < 0 or salida < 0:
             raise ErrorCiclo("los tokens no pueden ser negativos")
         inc = self.incidente(incidente_id)
         inc.tokens_entrada += entrada
         inc.tokens_salida += salida
+        if modelo is not None:
+            inc.modelo_llm = modelo
         self._guardar(inc)
-        self.auditoria.registrar(incidente_id, "costo_llm", entrada=entrada, salida=salida)
+        self.auditoria.registrar(
+            incidente_id, "costo_llm", entrada=entrada, salida=salida, modelo=modelo
+        )
 
     def revertir(self, incidente_id: str) -> ResultadoEjecucion:
         inc = self.incidente(incidente_id)

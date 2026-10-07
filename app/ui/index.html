@@ -25,7 +25,7 @@
   .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 12px; }
   .barra { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
   .barra .espacio { flex: 1; }
-  input { background: var(--bg); color: var(--text); border: 1px solid var(--line);
+  input, select { background: var(--bg); color: var(--text); border: 1px solid var(--line);
           border-radius: 4px; padding: 6px 8px; font: inherit; min-width: 0; }
   button { font: inherit; border-radius: 4px; padding: 6px 10px; cursor: pointer;
            border: 1px solid var(--line); background: var(--chip); color: var(--text); }
@@ -54,6 +54,7 @@
   ol.linea .datos { color: var(--muted); overflow-wrap: anywhere; }
   .vacio { color: var(--muted); padding: 8px 0; }
   .aviso { color: var(--bad); }
+  .sub { color: var(--muted); font-size: 12px; }
   #estado { color: var(--muted); font-size: 12px; }
   @media (max-width: 640px) { ol.linea li { grid-template-columns: 1fr; } }
 </style>
@@ -91,6 +92,30 @@
     </div>
   </section>
 
+  <section class="panel" aria-labelledby="llm-titulo">
+    <h2 id="llm-titulo">Modelo del agente</h2>
+    <div class="barra">
+      <label>Token admin <input id="admin-token" type="password" autocomplete="off" size="14"></label>
+      <button id="llm-cargar">Ver configuración</button>
+      <span id="llm-activo" class="mono"></span>
+    </div>
+    <div id="llm-cuerpo" hidden>
+      <div class="tabla"><table>
+        <thead><tr><th>Proveedor</th><th>API key</th><th>Cargar / reemplazar</th><th></th></tr></thead>
+        <tbody id="llm-filas"></tbody>
+      </table></div>
+      <div class="barra" style="margin-top:8px">
+        <label>Proveedor <select id="llm-prov"></select></label>
+        <label>Modelo <input id="llm-modelo" size="24" spellcheck="false"></label>
+        <button id="llm-probar">Probar conexión</button>
+        <button id="llm-usar" class="primario">Usar este modelo</button>
+        <button id="llm-default">Volver al default</button>
+      </div>
+      <p class="sub">Cambiar el modelo durante un experimento invalida la comparación entre corridas.
+        La key se guarda cifrada y no se vuelve a mostrar.</p>
+    </div>
+  </section>
+
   <section class="panel" id="detalle" hidden>
     <h2 id="detalle-titulo">Línea de tiempo</h2>
     <p id="detalle-resumen" class="mono"></p>
@@ -114,10 +139,10 @@ function el(tag, texto, clase) {
   return n;
 }
 
-async function api(ruta, opciones = {}) {
+async function api(ruta, opciones = {}, token = leer("aiops-token")) {
   const r = await fetch(ruta, {
     ...opciones,
-    headers: { "Authorization": "Bearer " + leer("aiops-token"), "Content-Type": "application/json" },
+    headers: { "Authorization": "Bearer " + token, "Content-Type": "application/json" },
   });
   if (!r.ok) {
     let detalle = r.statusText;
@@ -242,6 +267,62 @@ $("kill").addEventListener("click", async () => {
   try {
     await api("/kill-switch", { method: "POST", body: JSON.stringify({ usuario, activo: activar, motivo }) });
     await refrescar();
+  } catch (e) { $("estado").textContent = "Error: " + e.message; }
+});
+
+// --- Modelo del agente. El token admin queda solo en memoria (no en sessionStorage).
+const admin = (ruta, opciones) => api(ruta, opciones, $("admin-token").value.trim());
+
+function pintarLLM(cfg) {
+  $("llm-cuerpo").hidden = false;
+  const a = cfg.activo;
+  $("llm-activo").textContent = a.proveedor ? `En uso: ${a.proveedor}:${a.modelo}` : "En uso: modelo por defecto (agent.yaml)";
+  const tbody = $("llm-filas"); tbody.replaceChildren();
+  const sel = $("llm-prov"); const previo = sel.value; sel.replaceChildren();
+  for (const p of cfg.proveedores) {
+    const tr = el("tr");
+    const key = el("input"); key.type = "password"; key.autocomplete = "off"; key.size = 20;
+    key.placeholder = "pegar API key"; key.setAttribute("aria-label", "API key de " + p.nombre);
+    const g = el("button", "Guardar");
+    g.addEventListener("click", () => accionLLM(`/config/llm/credenciales/${p.id}`,
+      { method: "PUT", body: JSON.stringify({ api_key: key.value, usuario: usuarioActual() }) }));
+    const td = el("td"); td.append(key, " ", g);
+    const borrar = el("td");
+    if (p.configurada) {
+      const b = el("button", "Borrar", "peligro");
+      b.addEventListener("click", () => confirm(`¿Borrar la key de ${p.nombre}?`) &&
+        accionLLM(`/config/llm/credenciales/${p.id}?usuario=${encodeURIComponent(usuarioActual())}`, { method: "DELETE" }));
+      borrar.append(b);
+    }
+    tr.append(el("td", p.nombre), el("td", p.configurada ? `••••${p.sufijo} (${p.actualizado_por})` : "sin key", "mono"), td, borrar);
+    tbody.append(tr);
+    const o = el("option", p.nombre + (p.configurada ? "" : " (sin key)")); o.value = p.id; o.dataset.ejemplo = p.ejemplo;
+    sel.append(o);
+  }
+  sel.value = previo || a.proveedor || cfg.proveedores[0].id;
+  if (a.proveedor && !$("llm-modelo").value) $("llm-modelo").value = a.modelo;
+  $("llm-modelo").placeholder = sel.selectedOptions[0]?.dataset.ejemplo || "";
+}
+
+async function accionLLM(ruta, opciones) {
+  if (!usuarioActual()) return;
+  try { pintarLLM(await admin(ruta, opciones)); $("estado").textContent = "Configuración del modelo guardada."; }
+  catch (e) { $("estado").textContent = "Error: " + e.message; }
+}
+
+$("llm-cargar").addEventListener("click", async () => {
+  try { pintarLLM(await admin("/config/llm")); } catch (e) { $("estado").textContent = "Error: " + e.message; }
+});
+$("llm-prov").addEventListener("change", () => { $("llm-modelo").placeholder = $("llm-prov").selectedOptions[0]?.dataset.ejemplo || ""; });
+$("llm-usar").addEventListener("click", () => accionLLM("/config/llm/activo",
+  { method: "PUT", body: JSON.stringify({ proveedor: $("llm-prov").value, modelo: $("llm-modelo").value.trim(), usuario: usuarioActual() }) }));
+$("llm-default").addEventListener("click", () => accionLLM("/config/llm/activo",
+  { method: "PUT", body: JSON.stringify({ proveedor: null, usuario: usuarioActual() }) }));
+$("llm-probar").addEventListener("click", async () => {
+  $("estado").textContent = "Probando…";
+  try {
+    const r = await admin("/config/llm/probar", { method: "POST", body: JSON.stringify({ proveedor: $("llm-prov").value, modelo: $("llm-modelo").value.trim() }) });
+    $("estado").textContent = (r.ok ? "OK: " : "Falló: ") + r.detalle;
   } catch (e) { $("estado").textContent = "Error: " + e.message; }
 });
 

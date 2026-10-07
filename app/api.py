@@ -34,20 +34,31 @@ from infra.alertas_webhook import alerta_desde_grafana
 app = FastAPI(title="aiops API")
 
 
-def requiere_token(authorization: Annotated[str | None, Header()] = None) -> None:
-    """AIOPS_API_TOKEN acepta varios tokens separados por coma: para rotar sin corte se
+def _verificar_token(variable: str, authorization: str | None) -> None:
+    """La variable acepta varios tokens separados por coma: para rotar sin corte se
     agrega el nuevo, se actualizan los clientes (contact point de Grafana, operadores)
     y recien despues se quita el viejo. Comparacion en tiempo constante (hmac)."""
-    validos = [t.strip() for t in os.environ.get("AIOPS_API_TOKEN", "").split(",") if t.strip()]
+    validos = [t.strip() for t in os.environ.get(variable, "").split(",") if t.strip()]
     if not validos:
-        raise HTTPException(500, "AIOPS_API_TOKEN no configurado")
+        raise HTTPException(500, f"{variable} no configurado")
     recibido = (authorization or "").encode()
     # Recorre todos sin cortar al primero que coincide: no filtra cual token es.
     if not any([hmac.compare_digest(recibido, f"Bearer {t}".encode()) for t in validos]):
         raise HTTPException(401, "token invalido o ausente")
 
 
+def requiere_token(authorization: Annotated[str | None, Header()] = None) -> None:
+    _verificar_token("AIOPS_API_TOKEN", authorization)
+
+
+def requiere_admin(authorization: Annotated[str | None, Header()] = None) -> None:
+    """Token aparte para configurar el LLM (API keys): el de operador (que tambien
+    tiene Grafana para el webhook) no alcanza para cambiar credenciales."""
+    _verificar_token("AIOPS_ADMIN_TOKEN", authorization)
+
+
 _AUTENTICADO = [Depends(requiere_token)]
+_ADMIN = [Depends(requiere_admin)]
 
 
 @app.get("/salud")
@@ -136,6 +147,7 @@ def _resumen(inc: Incidente) -> dict[str, Any]:
         "cerrado_en": inc.cerrado_en,
         "tokens_entrada": inc.tokens_entrada,
         "tokens_salida": inc.tokens_salida,
+        "modelo_llm": inc.modelo_llm,
     }
 
 
@@ -294,3 +306,70 @@ def metricas_prometheus() -> str:
         except ValueError:
             pass
     return "\n".join(lineas) + "\n"
+
+
+# --- Configuracion del LLM (infra/llm_config.py): proveedor, modelo y API key -------
+
+
+def _config_llm(fn: Any, *args: Any) -> Any:
+    from infra.llm_config import ConfigLLMError
+
+    try:
+        return fn(*args)
+    except ConfigLLMError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+def _usuario(body: dict[str, Any]) -> str:
+    usuario = body.get("usuario")
+    if not isinstance(usuario, str) or not usuario:
+        raise HTTPException(422, "falta 'usuario'")
+    return usuario
+
+
+@app.get("/config/llm", dependencies=_ADMIN)
+def ver_config_llm() -> dict[str, Any]:
+    """Proveedores, si tienen key (solo los ultimos 4 caracteres) y el modelo activo.
+    Nunca devuelve una API key."""
+    from infra import llm_config
+
+    return llm_config.estado()
+
+
+@app.put("/config/llm/credenciales/{proveedor}", dependencies=_ADMIN)
+def guardar_credencial_llm(proveedor: str, body: dict[str, Any]) -> dict[str, Any]:
+    from infra import llm_config
+
+    api_key = body.get("api_key")
+    if not isinstance(api_key, str):
+        raise HTTPException(422, "falta 'api_key'")
+    _config_llm(llm_config.guardar_api_key, proveedor, api_key, _usuario(body))
+    return llm_config.estado()
+
+
+@app.delete("/config/llm/credenciales/{proveedor}", dependencies=_ADMIN)
+def borrar_credencial_llm(proveedor: str, usuario: str) -> dict[str, Any]:
+    from infra import llm_config
+
+    _config_llm(llm_config.borrar_api_key, proveedor, usuario)
+    return llm_config.estado()
+
+
+@app.put("/config/llm/activo", dependencies=_ADMIN)
+def seleccionar_llm(body: dict[str, Any]) -> dict[str, Any]:
+    """`{"proveedor": null}` vuelve al modelo por defecto (agent.yaml)."""
+    from infra import llm_config
+
+    _config_llm(llm_config.seleccionar, body.get("proveedor"), body.get("modelo"), _usuario(body))
+    return llm_config.estado()
+
+
+@app.post("/config/llm/probar", dependencies=_ADMIN)
+def probar_llm(body: dict[str, Any]) -> dict[str, Any]:
+    from infra import llm_config
+
+    proveedor, modelo = body.get("proveedor"), body.get("modelo")
+    if not isinstance(proveedor, str) or not isinstance(modelo, str):
+        raise HTTPException(422, "faltan 'proveedor' y 'modelo'")
+    ok, detalle = _config_llm(llm_config.probar, proveedor, modelo)
+    return {"ok": ok, "detalle": detalle}

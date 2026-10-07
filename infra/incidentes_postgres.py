@@ -72,6 +72,7 @@ def _desde_dict(d: dict[str, Any]) -> Incidente:
         # .get con default: las filas guardadas antes de la Fase 6 no tienen estos campos.
         tokens_entrada=d.get("tokens_entrada", 0),
         tokens_salida=d.get("tokens_salida", 0),
+        modelo_llm=d.get("modelo_llm"),
     )
 
 

@@ -89,6 +89,8 @@ class Incidente:
     # Costo del LLM al atender el incidente (Fase 6, metrica de la tesis).
     tokens_entrada: int = 0
     tokens_salida: int = 0
+    # "proveedor:modelo" que atendio el incidente: comparar corridas exige saberlo.
+    modelo_llm: str | None = None
 
     @property
     def intentos(self) -> int:

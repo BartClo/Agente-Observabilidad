@@ -33,6 +33,12 @@ dependencies = [
     "fastapi>=0.142.2",
     "uvicorn>=0.54.0",
     "httpx>=0.28.1",
+    # Proveedores de LLM elegibles desde la UI (infra/llm_config.py). Anthropic y Google
+    # ya vienen con deepagents. Versiones resueltas por `uv add` el 2026-10-06.
+    "langchain-openai>=1.1.9",
+    "langchain-deepseek>=1.1.0",
+    # Cifrado de las API keys guardadas en Postgres (Fernet, AIOPS_SECRETS_KEY).
+    "cryptography>=50.0.1",
 ]
 
 [dependency-groups]
