@@ -140,6 +140,16 @@ services:
       - "host.docker.internal:host-gateway"
     profiles: ["observability"]
 
+  # Logs del laboratorio. Los envia Promtail desde k3d (k8s-lab/promtail.yaml) a
+  # host.k3d.internal:3100; el agente los lee con consultar_logs (AIOPS_LOKI_URL).
+  # Version: la disponible localmente al armarlo (2026-10-08), sin depender de la red.
+  loki:
+    image: grafana/loki:2.9.4
+    command: ["-config.file=/etc/loki/local-config.yaml"]
+    ports:
+      - "3100:3100"
+    profiles: ["observability"]
+
   grafana:
     image: grafana/grafana:11.4.0
     environment:
@@ -162,6 +172,7 @@ services:
       - "3001:3000"
     depends_on:
       - prometheus
+      - loki
     profiles: ["observability"]
 
   # Escenario `cola_detenida`: plugin rabbitmq_prometheus (metrica nativa
