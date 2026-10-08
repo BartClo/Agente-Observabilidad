@@ -54,6 +54,13 @@
   ol.linea .datos { color: var(--muted); overflow-wrap: anywhere; }
   .vacio { color: var(--muted); padding: 8px 0; }
   .aviso { color: var(--bad); }
+  ol.chat { list-style: none; margin: 0 0 8px; padding: 0; max-height: 380px; overflow-y: auto;
+            display: flex; flex-direction: column; gap: 6px; }
+  ol.chat li { padding: 6px 10px; border-radius: 6px; max-width: 85%; white-space: pre-wrap;
+               overflow-wrap: anywhere; }
+  ol.chat li.yo { align-self: flex-end; background: var(--accent); color: #fff; }
+  ol.chat li.agente { align-self: flex-start; background: var(--chip); }
+  ol.chat li.aviso-ev { align-self: center; color: var(--muted); font-size: 12px; background: none; }
   .sub { color: var(--muted); font-size: 12px; }
   #estado { color: var(--muted); font-size: 12px; }
   @media (max-width: 640px) { ol.linea li { grid-template-columns: 1fr; } }
@@ -90,6 +97,18 @@
         <tbody id="filas"><tr><td colspan="6" class="vacio">Conectar con el token para ver los incidentes.</td></tr></tbody>
       </table>
     </div>
+  </section>
+
+  <section class="panel" aria-labelledby="chat-titulo">
+    <div class="barra"><h2 id="chat-titulo">Chat con el agente · solo consulta</h2>
+      <span class="espacio"></span><button id="chat-nueva">Nueva conversación</button></div>
+    <ol id="chat-log" class="chat" aria-live="polite"></ol>
+    <form id="chat-form" class="barra">
+      <input id="chat-msg" maxlength="4000" placeholder="¿Qué pasó con checkout hoy? ¿Qué puede hacer el agente?" style="flex:1" aria-label="Mensaje">
+      <button class="primario" id="chat-enviar">Enviar</button>
+    </form>
+    <p class="sub">Responde sobre incidentes, historial, métricas y runbooks. No ejecuta ni aprueba nada:
+      eso lo hace el agente solo o vos con los botones de arriba. Los avisos 🔔 son lo que hizo el agente.</p>
   </section>
 
   <section class="panel" aria-labelledby="llm-titulo">
@@ -326,8 +345,61 @@ $("llm-probar").addEventListener("click", async () => {
   } catch (e) { $("estado").textContent = "Error: " + e.message; }
 });
 
-refrescar();
+// --- Chat (solo lectura) y avisos de lo que hizo el agente.
+const nuevaConversacion = () => { const id = crypto.randomUUID(); guardar("aiops-chat", id); return id; };
+let conversacion = leer("aiops-chat") || nuevaConversacion();
+let ultimoEvento = 0;
+
+function agregarChat(texto, clase) {
+  const log = $("chat-log");
+  log.append(el("li", texto, clase));
+  log.scrollTop = log.scrollHeight;
+}
+
+const TEXTO_EVENTO = {
+  abierto: "abrió el incidente", confirmacion: "revisó la anomalía", clasificacion: "clasificó",
+  diagnostico: "diagnosticó", decision_politica: "consultó la política", accion: "ejecutó",
+  verificacion: "verificó", cerrado: "cerró el incidente ✅", escalado: "escaló a un humano ⚠️",
+  aprobacion: "decisión humana", descartado: "descartó (falso positivo)",
+  alerta_resuelta_en_origen: "la alerta se resolvió en Grafana", consulta_logs: "consultó logs",
+};
+const OCULTOS = new Set(["costo_llm"]);
+
+async function avisos() {
+  if (!leer("aiops-token")) return;
+  try {
+    const evs = await api(`/eventos?desde=${ultimoEvento}&limite=${ultimoEvento ? 50 : 10}`);
+    for (const e of evs) {
+      ultimoEvento = Math.max(ultimoEvento, e.ts);
+      if (OCULTOS.has(e.tipo)) continue;
+      const que = TEXTO_EVENTO[e.tipo] || e.tipo;
+      const d = e.datos || {};
+      const extra = [d.accion, d.veredicto, d.categoria, d.motivo, d.ok === false ? "falló" : ""].filter(Boolean).join(" · ");
+      agregarChat(`🔔 ${new Date(e.ts * 1000).toLocaleTimeString()} · ${e.incidente}: ${que}${extra ? " · " + extra : ""}`, "aviso-ev");
+    }
+  } catch {}
+}
+
+$("chat-form").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  const msg = $("chat-msg").value.trim();
+  if (!msg) return;
+  $("chat-msg").value = ""; $("chat-enviar").disabled = true;
+  agregarChat(msg, "yo");
+  try {
+    const r = await api("/chat", { method: "POST", body: JSON.stringify({ conversacion, mensaje: msg }) });
+    agregarChat(r.respuesta, "agente");
+  } catch (e) { agregarChat("Error: " + e.message, "aviso-ev"); }
+  $("chat-enviar").disabled = false; $("chat-msg").focus();
+});
+$("chat-nueva").addEventListener("click", () => {
+  conversacion = nuevaConversacion();
+  $("chat-log").replaceChildren(); ultimoEvento = 0; avisos();
+});
+
+refrescar(); avisos();
 setInterval(refrescar, 5000);
+setInterval(avisos, 5000);
 </script>
 </body>
 </html>

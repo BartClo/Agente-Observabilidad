@@ -10,7 +10,7 @@ import os
 from pathlib import Path
 
 from domain.aiops_core.acciones import BackendAcciones, BackendDeshabilitado
-from domain.aiops_core.auditoria import Auditoria
+from domain.aiops_core.auditoria import Auditoria, Evento
 from domain.aiops_core.ciclo import Ciclo
 from domain.aiops_core.observabilidad import ObservabilidadPort
 from domain.aiops_core.politicas import Politica, politica_desde_entorno
@@ -110,3 +110,14 @@ def get_ciclo() -> Ciclo:
 def reset(ciclo: Ciclo | None = None) -> None:
     global _ciclo
     _ciclo = ciclo
+
+
+def eventos_de(incidente_id: str) -> list[Evento]:
+    """Linea de tiempo de un incidente. El proceso que lo atendio (el worker) no es el
+    que pregunta (API, chat): Auditoria.eventos vive en memoria de CADA proceso, asi
+    que en modo postgres se relee desde ahi."""
+    if os.environ.get("AIOPS_PERSISTENCIA") == "postgres":
+        from infra.auditoria_postgres import eventos_de_incidente
+
+        return eventos_de_incidente(incidente_id)
+    return get_ciclo().auditoria.de_incidente(incidente_id)

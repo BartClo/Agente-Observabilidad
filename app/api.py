@@ -25,7 +25,6 @@ from fastapi.responses import HTMLResponse, PlainTextResponse
 
 from agents.aiops import runtime
 from domain.aiops_core import metricas
-from domain.aiops_core.auditoria import Evento
 from domain.aiops_core.ciclo import ErrorCiclo
 from domain.aiops_core.modelos import Incidente
 from infra import kill_switch
@@ -156,18 +155,6 @@ def listar_incidentes() -> list[dict[str, Any]]:
     return [_resumen(i) for i in runtime.get_ciclo().incidentes()]
 
 
-def _eventos_de(incidente_id: str) -> list[Evento]:
-    # El proceso que atendio el incidente (el worker, ver worker_jobs.py) no es el
-    # mismo que responde esta request (la API): Auditoria.eventos vive en memoria de
-    # CADA proceso, asi que en modo postgres hay que releer desde ahi, no de
-    # ciclo.auditoria (que solo tiene lo que vio ESTE proceso).
-    if os.environ.get("AIOPS_PERSISTENCIA") == "postgres":
-        from infra.auditoria_postgres import eventos_de_incidente
-
-        return eventos_de_incidente(incidente_id)
-    return runtime.get_ciclo().auditoria.de_incidente(incidente_id)
-
-
 @app.get("/incidentes/{incidente_id}", dependencies=_AUTENTICADO)
 def ver_incidente(incidente_id: str) -> dict[str, Any]:
     try:
@@ -182,7 +169,7 @@ def ver_incidente(incidente_id: str) -> dict[str, Any]:
         "acciones": [dataclasses.asdict(a) for a in inc.acciones],
         "aprobacion": dataclasses.asdict(inc.aprobacion) if inc.aprobacion else None,
         "linea_de_tiempo": [
-            {"ts": e.ts, "tipo": e.tipo, "datos": e.datos} for e in _eventos_de(incidente_id)
+            {"ts": e.ts, "tipo": e.tipo, "datos": e.datos} for e in runtime.eventos_de(incidente_id)
         ],
     }
 
@@ -373,3 +360,62 @@ def probar_llm(body: dict[str, Any]) -> dict[str, Any]:
         raise HTTPException(422, "faltan 'proveedor' y 'modelo'")
     ok, detalle = _config_llm(llm_config.probar, proveedor, modelo)
     return {"ok": ok, "detalle": detalle}
+
+
+# --- Chat de consulta (agents/aiops/chat.py): SOLO LECTURA, no ejecuta nada -------
+
+_MAX_MENSAJE = 4000
+
+
+@app.post("/chat", dependencies=_AUTENTICADO)
+def chat(body: dict[str, Any]) -> dict[str, str]:
+    import re
+
+    from agents.aiops import chat as chat_aiops
+    from app.main import modelo_de_la_ui
+
+    conversacion, mensaje = body.get("conversacion"), body.get("mensaje")
+    if not isinstance(conversacion, str) or not re.fullmatch(r"[A-Za-z0-9-]{8,64}", conversacion):
+        raise HTTPException(422, "'conversacion' invalida")
+    if not isinstance(mensaje, str) or not mensaje.strip() or len(mensaje) > _MAX_MENSAJE:
+        raise HTTPException(422, f"'mensaje' vacio o de mas de {_MAX_MENSAJE} caracteres")
+    activo = modelo_de_la_ui()
+    try:
+        respuesta = chat_aiops.responder(
+            conversacion, mensaje.strip(), activo[0] if activo else None
+        )
+    except Exception as exc:  # proveedor caido, key invalida: error legible, no un 500 mudo
+        raise HTTPException(
+            502,
+            f"el modelo no respondio ({type(exc).__name__}): revisar el modelo y la API key "
+            "en 'Modelo del agente'",
+        ) from exc
+    return {"respuesta": respuesta}
+
+
+@app.get("/eventos", dependencies=_AUTENTICADO)
+def eventos_recientes(desde: float = 0, limite: int = 50) -> list[dict[str, Any]]:
+    """Feed de lo que hizo el agente (avisos del chat): eventos de auditoria posteriores
+    a `desde` (epoch), sin pasar por el LLM. Solo en modo postgres (la auditoria del
+    worker vive ahi); en memoria devuelve lo que vio este proceso."""
+    limite = max(1, min(limite, 200))
+    if os.environ.get("AIOPS_PERSISTENCIA") == "postgres":
+        import psycopg
+
+        with psycopg.connect(os.environ["DATABASE_URL"], autocommit=True) as conn:
+            filas = conn.execute(
+                "SELECT ts, incidente_id, tipo, datos FROM aiops_eventos_auditoria "
+                "WHERE ts > to_timestamp(%s) AND incidente_id <> 'config:llm' "
+                "ORDER BY ts DESC LIMIT %s",
+                (desde, limite),
+            ).fetchall()
+        eventos = [
+            {"ts": ts.timestamp(), "incidente": i, "tipo": t, "datos": d} for ts, i, t, d in filas
+        ]
+    else:
+        eventos = [
+            {"ts": e.ts, "incidente": e.incidente_id, "tipo": e.tipo, "datos": e.datos}
+            for e in runtime.get_ciclo().auditoria.eventos
+            if e.ts > desde
+        ][-limite:][::-1]
+    return eventos[::-1]  # mas viejo primero, para agregarlos en orden
