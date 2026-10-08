@@ -187,6 +187,9 @@ def _env_ciclo(nivel: int, puerto: str) -> list[str]:
     env = {
         "AIOPS_BACKEND": "prometheus",
         "AIOPS_PROMETHEUS_URL": "http://prometheus:9090",
+        # Logs (k8s-lab/promtail.yaml): explicito como Prometheus, para no depender de
+        # que el contenedor haya releido el .env.
+        "AIOPS_LOKI_URL": "http://loki:3100",
         "AIOPS_ACTIONS": "k8s",
         "AIOPS_K8S_API": f"https://host.docker.internal:{puerto}",
         "AIOPS_K8S_TOKEN_FILE": "k8s-lab/.secrets/token",
