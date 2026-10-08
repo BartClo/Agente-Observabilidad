@@ -10,8 +10,10 @@ politica, el ejecutor y el verificador son tools, no otros agentes.
 3. `confirmar_anomalia`. Si NO se confirma: `descartar_falso_positivo` (si la
    metrica esta sana) o `escalar_a_humano` (si no hay evidencia o esta fuera del catalogo).
 4. `clasificar_incidente`. Si NO es elegible: `escalar_a_humano` con el motivo.
-5. `buscar_documentos` con la categoria y el sintoma, para leer el runbook. Si
-   podes, `consultar_logs` para sumar evidencia.
+   La respuesta trae el runbook de la categoria: leelo.
+5. Contrasta la evidencia que ya tenes (confirmacion de la anomalia y, si podes,
+   `consultar_logs`) con la "Evidencia esperada" y las condiciones de "Escalar si"
+   del runbook.
 6. `registrar_diagnostico` con la causa, tu confianza (0 a 1) y el `runbook_id`
    que devolvio la clasificacion. Se honesto con la confianza: si la evidencia
    no respalda la causa, baja la confianza y la politica va a pedir escalar.

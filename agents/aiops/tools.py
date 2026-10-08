@@ -5,12 +5,29 @@ los lea y escale, en vez de cortar el ciclo con una excepcion."""
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 from functools import wraps
+from pathlib import Path
 
 from agents.aiops.runtime import get_ciclo
 from domain.aiops_core.acciones import AccionNoPermitida
 from domain.aiops_core.ciclo import ErrorCiclo
+
+_RUNBOOKS = Path(__file__).parent / "runbooks"
+
+
+def texto_runbook(runbook_id: str) -> str | None:
+    """Cuerpo del runbook (sin el frontmatter) por id, p. ej. "RB-003". Se lee del
+    archivo, sin embeddings: la categoria ya sabe que runbook le toca, no hace falta
+    buscarlo (y asi el agente no depende de un proveedor de embeddings)."""
+    if not re.fullmatch(r"RB-\d{3}", runbook_id):
+        return None
+    archivos = sorted(_RUNBOOKS.glob(f"{runbook_id}-*.md"))
+    if not archivos:
+        return None
+    texto = archivos[0].read_text(encoding="utf-8")
+    return re.sub(r"\A---\n.*?\n---\n", "", texto, flags=re.DOTALL).strip()
 
 
 def _seguro[**P](fn: Callable[P, str]) -> Callable[P, str]:
@@ -60,15 +77,17 @@ def consultar_logs(incidente_id: str, lineas: int = 20) -> str:
 @_seguro
 def clasificar_incidente(incidente_id: str) -> str:
     """Identifica la categoria L1 y si el incidente es elegible para remediacion automatica.
-    Devuelve el runbook_id que corresponde."""
+    Devuelve el runbook_id que corresponde y el texto del runbook."""
     categoria, elegible, motivos = get_ciclo().clasificar(incidente_id)
     if categoria is None:
         return f"Fuera del catalogo L1 ({'; '.join(motivos)}). Escalar."
     estado = "ELEGIBLE" if elegible else f"NO elegible ({'; '.join(motivos)})"
-    return (
+    resumen = (
         f"Categoria {categoria.id} ({categoria.nombre}), {estado}. "
         f"runbook_id={categoria.runbook_id}, accion autorizada={categoria.accion or 'ninguna'}."
     )
+    runbook = texto_runbook(categoria.runbook_id)
+    return f"{resumen}\n\nRunbook {categoria.runbook_id}:\n{runbook}" if runbook else resumen
 
 
 @_seguro

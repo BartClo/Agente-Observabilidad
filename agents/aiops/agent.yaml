@@ -21,10 +21,9 @@ tools:
   - tools:descartar_falso_positivo
   - tools:estado_incidente
 skills: skills
-# Runbooks indexados con: make rag-ingest COLLECTION=aiops_runbooks SRC=agents/aiops/runbooks
-rag:
-  collection: aiops_runbooks
-  k: 3
+# Sin `rag:` a proposito: el runbook de la categoria lo devuelve clasificar_incidente,
+# leido del archivo (sin embeddings, funciona con cualquier proveedor de LLM y ahorra
+# una vuelta del agente). El RAG queda para bases documentales grandes.
 # Autonomia nivel 2: la ejecucion con aprobacion queda pausada hasta que un humano
 # la apruebe. ejecutar_remediacion (sin aprobacion) la controla la politica de domain/.
 require_approval:

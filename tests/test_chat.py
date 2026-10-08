@@ -48,7 +48,7 @@ def test_el_chat_no_tiene_tools_de_escritura() -> None:
         "ver_incidente",
         "ver_metricas",
         "capacidades",
-        "buscar_runbooks",
+        "leer_runbook",
     }
 
 
@@ -66,16 +66,9 @@ def test_tools_de_lectura(cliente: TestClient) -> None:  # noqa: F811
     assert caps["kill_switch_activo"] is False
 
 
-def test_buscar_runbooks_sin_rag_no_rompe(monkeypatch: pytest.MonkeyPatch) -> None:
-    from rag import retrieve
-
-    def falla(*a: Any, **k: Any) -> Any:
-        raise RuntimeError("sin embeddings")
-
-    monkeypatch.setattr(retrieve, "search", falla)
-    assert "no disponible" in chat.buscar_runbooks("disco")
-    monkeypatch.setattr(retrieve, "search", lambda *a, **k: [])
-    assert chat.buscar_runbooks("disco") == "Sin resultados."
+def test_leer_runbook() -> None:
+    assert "recreate_pod" in chat.leer_runbook(" rb-003 ")
+    assert chat.leer_runbook("RB-999").startswith("No existe")
 
 
 def test_responder_usa_tools_y_recuerda_la_conversacion(
