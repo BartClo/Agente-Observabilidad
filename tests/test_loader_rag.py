@@ -54,3 +54,12 @@ def test_rag_tool_gets_added_when_configured(
     assert called_with == {"collection": "demo", "query": "pregunta de prueba", "k": 2}
     assert "doc.md" in output
     assert "contenido" in output
+
+
+def test_rag_tool_sin_embeddings_no_corta_al_agente(monkeypatch: pytest.MonkeyPatch) -> None:
+    def falla(*a: object, **k: object) -> None:
+        raise RuntimeError("sin OPENAI_API_KEY")
+
+    monkeypatch.setattr(rag_retrieve, "search", falla)
+    tool = loader._build_rag_tool({"collection": "x"})
+    assert "no disponible" in tool("disco lleno")

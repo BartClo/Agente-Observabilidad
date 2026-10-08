@@ -63,7 +63,10 @@ def _build_rag_tool(rag_field: dict[str, Any]) -> Callable[[str], str]:
         no de conocimiento general. Cada resultado trae su `fuente`: si se cita
         en la respuesta, citar tambien esa fuente.
         """
-        results = rag_retrieve.search(collection, query, k=k)
+        try:
+            results = rag_retrieve.search(collection, query, k=k)
+        except Exception as exc:  # sin embeddings/ingesta: el agente sigue sin RAG
+            return f"Busqueda de documentos no disponible ({type(exc).__name__})."
         if not results:
             return "Sin resultados."
         return "\n\n".join(f"[fuente: {r.source}]\n{r.content}" for r in results)
