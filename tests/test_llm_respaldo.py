@@ -69,7 +69,7 @@ def _usar(
     monkeypatch.setattr(
         "app.main.respaldo_de_la_ui", lambda: ("M2", "google:gemini-x") if respaldo else None
     )
-    monkeypatch.setattr("app.main.build_agent", lambda modelo=None: agentes[modelo])
+    monkeypatch.setattr("agents.aiops.agente.construir", lambda modelo=None: agentes[modelo])
 
 
 def test_si_el_principal_falla_el_respaldo_retoma(

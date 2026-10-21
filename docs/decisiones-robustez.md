@@ -176,8 +176,11 @@ un acto autenticado en la UI, a propósito.
 ## D6. El pod `api` del laboratorio deja constancia en su log
 
 **Problema.** `pod_fallido` escaló 2 de 3 veces con DeepSeek porque el pod no escribía
-nada: el agente veía `pod_ready=0` sin logs y bajaba la confianza (0,6–0,7 < 0,8). Es el
-mismo mecanismo que `servicio_detenido` antes de tener Loki (0,6 → 0,85 al tener logs).
+nada: el agente veía `pod_ready=0` sin logs y citaba esa falta al bajar su confianza
+(0,6–0,7 < 0,8). En `servicio_detenido` la confianza pasó de 0,60 (sin Loki) a 0,85 (con
+logs). Son observaciones con `n` pequeño y con variabilidad entre corridas (el mismo
+`pod_fallido` sin logs también llegó a 0,85 una vez): justifican mejorar la evidencia
+disponible, no afirmar un efecto.
 
 **Decisión.** El contenedor registra su arranque y **solo los cambios** de estado de su
 chequeo de salud ("ERROR api: chequeo de salud fallando…"). No cambia el umbral de
@@ -186,3 +189,52 @@ declara como condición de la autonomía.
 
 **Límite.** Con esto el lab se parece más a un servicio real, pero sigue siendo
 inyección de fallas conocidas. Se declara como amenaza a la validez.
+
+## D7. Un agente único de tool-calling en lugar del orquestador + subagente
+
+**Problema.** Cada incidente consumía ~65 mil tokens de entrada. La tesis mide el costo y
+defiende "agente único" (sección 2.4), pero el worker corría un orquestador que solo
+delegaba en un subagente `aiops` (herencia de la plantilla multiagente del repositorio).
+
+**Medición (sin gastar LLM).** `scripts/medir_contexto.py` captura la primera solicitud
+al modelo con un LLM falso y cuenta el contexto **fijo** que se reenvía en cada llamada:
+
+| Arquitectura | Tools | Tokens sistema | Tokens tools | Total por llamada |
+|---|---|---|---|---|
+| A. Orquestador (2 llamadas por incidente) | 8 | 52 | 2.605 | 2.681 |
+| B. Deep agent con las tools de aiops (equivale al subagente) | 22 | 1.186 | 3.828 | 5.038 |
+| **C. Agente de tool-calling único (adoptado)** | **14** | 649 | 1.337 | **2.010** |
+
+Conteo con `cl100k_base` (aproximado para otros proveedores). El subagente pesaba ~5.000
+tokens por llamada: sus 14 tools más 8 tools internas de deepagents que el agente no usa
+(archivos, lista de tareas, `task`) y la sección de skills. Con ~12 llamadas por incidente,
+~12 × 5.000 ≈ 60 mil explica el costo observado; el orquestador aportaba poco.
+
+**Decisión.** El worker corre `agents/aiops/agente.py`: un `create_agent` de LangChain con
+el prompt y las 14 tools de `agents/aiops/agent.yaml` (se reutiliza la misma definición).
+La plantilla multiagente (`app/main.py`) sigue disponible para otros agentes.
+
+**Seguridad: no cambia.** Quitar deepagents elimina su `interrupt_on`, pero la aprobación
+humana nunca dependió de él: `Ciclo.ejecutar_remediacion(aprobada=True)` exige una
+aprobación registrada en el dominio y, si no la hay, la tool devuelve ERROR (test
+`test_sin_interrupt_on_la_aprobacion_la_sigue_exigiendo_el_dominio`). También desaparecen
+las tools de archivos y `task` (menos superficie para el LLM).
+
+**Qué no se afirma.** La reducción medida es la del contexto fijo por llamada
+(~60 %). El ahorro total de tokens por incidente depende además del historial acumulado y
+del número de vueltas, y se valida en corridas reales (ver resultados). El comportamiento
+del agente puede cambiar al cambiar su contexto: por eso este cambio va **antes** de
+congelar el agente para el experimento.
+
+**Descartado.**
+- Quitar solo el orquestador (arquitectura B): ahorra ~5 mil tokens (~8 %), no el grueso.
+- Skills de deepagents: el listado costaba tokens y el agente casi no leía el archivo;
+  el catálogo y la acción llegan por `clasificar_incidente`.
+
+## D8. Turnos y llamadas a tools por incidente
+
+La sección 6.5 pide "número de turnos de investigación por incidente". Un callback de
+LangChain cuenta las llamadas al LLM y a tools de la corrida completa (los callbacks de
+`config` los heredan los runs hijos) y las suma en el incidente, incluso si hubo respaldo.
+Las "tools" incluyen las internas del framework cuando existan, y se declara así en la
+tesis. Columnas `turnos_llm` y `llamadas_tools` en el CSV del experimento.

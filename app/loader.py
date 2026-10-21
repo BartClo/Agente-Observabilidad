@@ -107,6 +107,12 @@ def _build_subagent(agent_dir: Path, modelo_override: Any = None) -> SubAgent:
     return subagent
 
 
+def cargar_agente(nombre: str, modelo_override: Any = None) -> SubAgent:
+    """Definicion de UN agente de agents/<nombre>/ (prompt, tools, modelo) para quien lo
+    corre por su cuenta, sin el orquestador (ver agents/aiops/agente.py)."""
+    return _build_subagent(AGENTS_DIR / nombre, modelo_override)
+
+
 def load_subagents(modelo_override: Any = None) -> list[SubAgent]:
     """Un `SubAgent` por cada `agents/<nombre>/agent.yaml`, salvo `_template`."""
     subagents = []

@@ -8,7 +8,7 @@ FailedJobRegistry de RQ (la cola de mensajes fallidos).
 
 Alcance verificado: abrir/auditar el incidente, el lock por servicio y que las tools
 del agente vean el incidente (con un agente falso). Que el LLM real
-(`build_agent().invoke(...)`) atienda el incidente de punta a punta NO se probo: requiere
+(`agente.construir().invoke(...)`) atienda el incidente de punta a punta NO se probo: requiere
 `ANTHROPIC_API_KEY`. Ver docs/plan-aiops.md.
 """
 
@@ -114,7 +114,8 @@ def atender_con_agente(ciclo: Ciclo, incidente_id: str, alerta: Alerta) -> None:
 
     from langchain_core.callbacks import UsageMetadataCallbackHandler
 
-    from app.main import ORCHESTRATOR_MODEL, build_agent, modelo_de_la_ui, respaldo_de_la_ui
+    from agents.aiops.agente import construir, modelo_por_defecto
+    from app.main import modelo_de_la_ui, respaldo_de_la_ui
 
     pedido = (
         f"Atiende el incidente {incidente_id} (alerta {alerta.nombre} en {alerta.servicio}, "
@@ -123,9 +124,9 @@ def atender_con_agente(ciclo: Ciclo, incidente_id: str, alerta: Alerta) -> None:
     # El callback suma el uso de TODAS las llamadas al LLM de la corrida, incluidas las
     # del subagente aiops dentro de su tool call: contar solo los mensajes finales del
     # orquestador subestimaria el costo (Fase 6).
-    # Modelo elegido desde la UI (si hay); si no, el de agent.yaml / ORCHESTRATOR_MODEL.
+    # Modelo elegido desde la UI (si hay); si no, el de agent.yaml.
     activo = modelo_de_la_ui()
-    principal = activo if activo else (None, f"default:{ORCHESTRATOR_MODEL}")
+    principal = activo if activo else (None, f"default:{modelo_por_defecto()}")
     respaldo = respaldo_de_la_ui()
     corridas = [principal] + ([respaldo] if respaldo else [])
     uso = UsageMetadataCallbackHandler()
@@ -136,7 +137,7 @@ def atender_con_agente(ciclo: Ciclo, incidente_id: str, alerta: Alerta) -> None:
         for i, (modelo, etiqueta) in enumerate(corridas):
             usados.append(etiqueta)
             try:
-                build_agent(modelo).invoke(
+                construir(modelo).invoke(
                     {
                         "messages": [
                             {"role": "user", "content": pedido if i == 0 else _retomar(pedido)}
