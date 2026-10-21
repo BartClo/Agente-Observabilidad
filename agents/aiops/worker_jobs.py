@@ -133,11 +133,12 @@ def atender_con_agente(ciclo: Ciclo, incidente_id: str, alerta: Alerta) -> None:
     contador = ContadorTurnos()
     usados: list[str] = []
     primer_error: Exception | None = None
+    final: Any = None
     try:
         for i, (modelo, etiqueta) in enumerate(corridas):
             usados.append(etiqueta)
             try:
-                construir(modelo).invoke(
+                final = construir(modelo).invoke(
                     {
                         "messages": [
                             {"role": "user", "content": pedido if i == 0 else _retomar(pedido)}
@@ -168,6 +169,8 @@ def atender_con_agente(ciclo: Ciclo, incidente_id: str, alerta: Alerta) -> None:
                 )
         if primer_error is not None:
             raise primer_error
+        # Fuera del try de las corridas: un fallo aca no debe disparar el respaldo.
+        _cerrar_cabos_sueltos(ciclo, incidente_id, final)
     finally:
         # Tambien si el agente fallo a mitad: los tokens gastados igual cuestan.
         entrada, salida = tokens_de(uso.usage_metadata)
@@ -197,6 +200,30 @@ class ContadorTurnos(BaseCallbackHandler):
 
 
 _TERMINALES = (Estado.RESUELTO, Estado.ESCALADO, Estado.DESCARTADO)
+
+
+def _texto_final(resultado: Any) -> str:
+    try:
+        return str(resultado["messages"][-1].text).strip()
+    except (KeyError, IndexError, TypeError, AttributeError):
+        return ""
+
+
+def _cerrar_cabos_sueltos(ciclo: Ciclo, incidente_id: str, resultado: Any) -> None:
+    """Un LLM que termina sin cerrar ni escalar deja el incidente en el limbo (corrida
+    del 2026-10-21: el agente paro a los 3 turnos). Se deja su ultimo mensaje en la
+    auditoria como evidencia y, si el incidente no termino ni espera a un humano
+    (nivel 2), se escala: nunca queda abandonado sin que nadie se entere."""
+    texto = _texto_final(resultado)
+    inc = ciclo.incidente(incidente_id)
+    ciclo.auditoria.registrar(incidente_id, "agente_fin", estado=str(inc.estado), texto=texto[:500])
+    if inc.estado in _TERMINALES or ciclo.espera_aprobacion(inc):
+        return
+    ciclo.escalar(
+        incidente_id,
+        f"El agente termino sin cerrar ni escalar el incidente (estado {inc.estado}). "
+        f"Ultimo mensaje del agente: {texto[:400] or '(vacio)'}",
+    )
 
 
 def _retomar(pedido: str) -> str:

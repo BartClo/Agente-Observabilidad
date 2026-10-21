@@ -398,7 +398,7 @@ class Ciclo:
             if inc.estado in (Estado.RESUELTO, Estado.ESCALADO, Estado.DESCARTADO):
                 continue
             edad = self._reloj() - inc.abierto_en
-            if edad < max_edad_s or self._espera_aprobacion(inc):
+            if edad < max_edad_s or self.espera_aprobacion(inc):
                 continue
             if inc.acciones:
                 recuperado, detalle = self.verificar(inc.id)
@@ -420,7 +420,9 @@ class Ciclo:
             tocados.append(inc.id)
         return tocados
 
-    def _espera_aprobacion(self, inc: Incidente) -> bool:
+    def espera_aprobacion(self, inc: Incidente) -> bool:
+        """Nivel 2: diagnosticado, elegible y sin decision humana todavia. Es una espera
+        legitima, no un incidente abandonado."""
         return (
             self.politica.nivel is NivelAutonomia.CON_APROBACION
             and inc.estado is Estado.DIAGNOSTICADO

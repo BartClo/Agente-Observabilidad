@@ -137,3 +137,51 @@ def test_si_el_incidente_ya_termino_no_se_llama_al_respaldo(
     with pytest.raises(ConnectionError):
         atender_con_agente(ciclo, inc_id, alerta)
     assert respaldo.pedidos == []  # nada que retomar
+
+
+def test_si_el_agente_termina_sin_cerrar_ni_escalar_se_escala_con_su_ultimo_mensaje(
+    incidente: tuple[Any, str, Alerta], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ciclo, inc_id, alerta = incidente
+
+    class AgenteQueSeRinde(AgenteFalso):
+        def invoke(self, entrada: dict[str, Any], config: dict[str, Any]) -> Any:
+            super().invoke(entrada, config)
+
+            class Msg:
+                text = "No pude abrir la alerta, termino aqui."
+
+            return {"messages": [Msg()]}
+
+    _usar(monkeypatch, AgenteQueSeRinde(turnos=3, tools=2), None)
+    atender_con_agente(ciclo, inc_id, alerta)
+    inc = ciclo.incidente(inc_id)
+    assert inc.estado is Estado.ESCALADO and inc.intervencion_humana
+    assert inc.motivo_escalamiento and "No pude abrir la alerta" in inc.motivo_escalamiento
+    (fin,) = [e for e in ciclo.auditoria.eventos if e.tipo == "agente_fin"]
+    assert fin.datos["estado"] == "abierto" and "No pude abrir" in fin.datos["texto"]
+
+
+def test_si_el_agente_ya_escalo_no_se_escala_dos_veces(
+    incidente: tuple[Any, str, Alerta], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ciclo, inc_id, alerta = incidente
+    _usar(monkeypatch, AgenteFalso(escala=lambda: ciclo.escalar(inc_id, "lo hizo el agente")), None)
+    atender_con_agente(ciclo, inc_id, alerta)
+    assert [e.tipo for e in ciclo.auditoria.eventos].count("escalado") == 1
+    assert ciclo.incidente(inc_id).motivo_escalamiento == "lo hizo el agente"
+
+
+def test_si_espera_aprobacion_humana_no_se_escala(
+    incidente: tuple[Any, str, Alerta], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from domain.aiops_core.modelos import NivelAutonomia
+
+    ciclo, inc_id, alerta = incidente
+    ciclo.politica = type(ciclo.politica)(nivel=NivelAutonomia.CON_APROBACION)
+    inc = ciclo.incidente(inc_id)
+    inc.estado, inc.elegible = Estado.DIAGNOSTICADO, True
+    ciclo._guardar(inc)  # noqa: SLF001
+    _usar(monkeypatch, AgenteFalso(), None)
+    atender_con_agente(ciclo, inc_id, alerta)
+    assert ciclo.incidente(inc_id).estado is Estado.DIAGNOSTICADO  # espera a un humano
