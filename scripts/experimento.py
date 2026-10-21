@@ -190,6 +190,9 @@ def _env_ciclo(nivel: int, puerto: str) -> list[str]:
         # Logs (k8s-lab/promtail.yaml): explicito como Prometheus, para no depender de
         # que el contenedor haya releido el .env.
         "AIOPS_LOKI_URL": "http://loki:3100",
+        # El experimento no avisa a Google Chat: serian cientos de mensajes. El .env del
+        # contenedor si trae el webhook; aca se vacia a proposito.
+        "AIOPS_GCHAT_WEBHOOK_URL": "",
         "AIOPS_ACTIONS": "k8s",
         "AIOPS_K8S_API": f"https://host.docker.internal:{puerto}",
         "AIOPS_K8S_TOKEN_FILE": "k8s-lab/.secrets/token",

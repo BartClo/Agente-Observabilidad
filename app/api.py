@@ -17,6 +17,8 @@ from __future__ import annotations
 import dataclasses
 import hmac
 import os
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -30,7 +32,38 @@ from domain.aiops_core.modelos import Incidente
 from infra import kill_switch
 from infra.alertas_webhook import alerta_desde_grafana
 
-app = FastAPI(title="aiops API")
+
+async def _reintentar_avisos() -> None:
+    """Mientras la API este arriba, entrega los avisos pendientes de Google Chat (los que
+    fallaron al instante). Cada 30 s; un error aca nunca tumba la API."""
+    import asyncio
+    import logging
+
+    from infra import notificaciones
+
+    while True:
+        await asyncio.sleep(30)
+        url = os.environ.get("AIOPS_GCHAT_WEBHOOK_URL", "").strip()
+        if not url or not os.environ.get("DATABASE_URL"):
+            continue
+        try:
+            await asyncio.to_thread(notificaciones.entregar_pendientes, url, 20)
+        except Exception:
+            logging.getLogger(__name__).exception("reintento de avisos fallo")
+
+
+@asynccontextmanager
+async def _vida(_: FastAPI) -> AsyncIterator[None]:
+    import asyncio
+
+    tarea = asyncio.create_task(_reintentar_avisos())
+    try:
+        yield
+    finally:
+        tarea.cancel()
+
+
+app = FastAPI(title="aiops API", lifespan=_vida)
 
 
 def _verificar_token(variable: str, authorization: str | None) -> None:
@@ -215,6 +248,40 @@ def cambiar_kill_switch(body: dict[str, Any]) -> dict[str, Any]:
     return {"activo": kill_switch.leer()}
 
 
+@app.get("/notificaciones", dependencies=_AUTENTICADO)
+def estado_notificaciones() -> dict[str, Any]:
+    """Estado de los avisos a Google Chat: configurado y cuantos hay pendientes,
+    enviados y fallidos (agotaron los reintentos)."""
+    from agents.aiops import notificaciones
+
+    return notificaciones.estado()
+
+
+@app.post("/notificaciones/probar", dependencies=_ADMIN)
+def probar_notificaciones() -> dict[str, Any]:
+    """Manda un mensaje de prueba al espacio de Google Chat (sin pasar por la bandeja)
+    para validar el webhook. Admin: puede generar mensajes."""
+    from infra import gchat
+
+    url = os.environ.get("AIOPS_GCHAT_WEBHOOK_URL", "").strip()
+    if not url:
+        raise HTTPException(422, "AIOPS_GCHAT_WEBHOOK_URL no configurado")
+    try:
+        gchat.enviar(url, "🧪 *Prueba* de notificaciones del agente AIOps: el webhook funciona.")
+    except gchat.ErrorGChat as exc:
+        return {"ok": False, "detalle": str(exc)}
+    return {"ok": True, "detalle": "mensaje enviado"}
+
+
+@app.post("/reconciliar", dependencies=_AUTENTICADO)
+def reconciliar() -> dict[str, list[str]]:
+    """Cierra o escala los incidentes que quedaron a medias (ver Ciclo.reconciliar).
+    Pensado para un cron externo; el worker tambien barre al recibir cada alerta."""
+    from agents.aiops.worker_jobs import reconciliar_colgados
+
+    return {"reconciliados": reconciliar_colgados(runtime.get_ciclo())}
+
+
 @app.get("/metricas", dependencies=_AUTENTICADO)
 def ver_metricas() -> dict[str, Any]:
     incidentes = runtime.get_ciclo().incidentes()
@@ -250,6 +317,21 @@ def _metrica_jobs_fallidos() -> list[str]:
     ]
 
 
+def _metrica_notificaciones() -> list[str]:
+    """Bandeja de avisos a Google Chat. Sin Postgres/tabla se omite (como los jobs)."""
+    try:
+        from infra import notificaciones
+
+        n = notificaciones.conteos()
+    except Exception:
+        return []
+    return [
+        "# HELP aiops_notificaciones Avisos a Google Chat por estado.",
+        "# TYPE aiops_notificaciones gauge",
+        *(f'aiops_notificaciones{{estado="{e}"}} {c}' for e, c in sorted(n.items())),
+    ]
+
+
 @app.get("/metrics", response_class=PlainTextResponse)
 def metricas_prometheus() -> str:
     """Formato de exposicion de Prometheus (no requiere token: es lo que el propio
@@ -275,6 +357,7 @@ def metricas_prometheus() -> str:
     for (accion, ok), n in sorted(por_accion.items()):
         lineas.append(f'aiops_acciones_total{{accion="{accion}",ok="{str(ok).lower()}"}} {n}')
     lineas += _metrica_jobs_fallidos()
+    lineas += _metrica_notificaciones()
     lineas += [
         "# HELP aiops_tokens_llm_total Tokens del LLM gastados atendiendo incidentes.",
         "# TYPE aiops_tokens_llm_total counter",
@@ -348,6 +431,17 @@ def seleccionar_llm(body: dict[str, Any]) -> dict[str, Any]:
     from infra import llm_config
 
     _config_llm(llm_config.seleccionar, body.get("proveedor"), body.get("modelo"), _usuario(body))
+    return llm_config.estado()
+
+
+@app.put("/config/llm/respaldo", dependencies=_ADMIN)
+def seleccionar_respaldo_llm(body: dict[str, Any]) -> dict[str, Any]:
+    """Modelo que retoma el incidente si el principal falla. `{"proveedor": null}` lo quita."""
+    from infra import llm_config
+
+    _config_llm(
+        llm_config.seleccionar_respaldo, body.get("proveedor"), body.get("modelo"), _usuario(body)
+    )
     return llm_config.estado()
 
 

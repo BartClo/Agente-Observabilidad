@@ -29,7 +29,10 @@ def cliente(monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
     yield TestClient(app)
     with psycopg.connect(os.environ["DATABASE_URL"], autocommit=True) as conn:
         conn.execute("DELETE FROM aiops_llm_credenciales")
-        conn.execute("UPDATE aiops_llm_activo SET proveedor = NULL, modelo = NULL WHERE id = true")
+        conn.execute(
+            "UPDATE aiops_llm_activo SET proveedor = NULL, modelo = NULL, "
+            "respaldo_proveedor = NULL, respaldo_modelo = NULL WHERE id = true"
+        )
         conn.execute("DELETE FROM aiops_eventos_auditoria WHERE incidente_id = 'config:llm'")
 
 
@@ -111,3 +114,34 @@ def test_probar_y_volver_al_default(cliente: TestClient, monkeypatch: pytest.Mon
 def test_sin_base_de_datos_usa_el_modelo_por_defecto(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("DATABASE_URL")
     assert main.modelo_de_la_ui() is None
+
+
+def test_respaldo_por_api(cliente: TestClient) -> None:
+    for prov in ("deepseek", "google"):
+        cliente.put(
+            f"/config/llm/credenciales/{prov}",
+            headers=ADMIN,
+            json={"api_key": KEY, "usuario": "ana"},
+        )
+    cliente.put(
+        "/config/llm/activo",
+        headers=ADMIN,
+        json={"proveedor": "deepseek", "modelo": "deepseek-chat", "usuario": "ana"},
+    )
+    r = cliente.put(
+        "/config/llm/respaldo",
+        headers=ADMIN,
+        json={"proveedor": "google", "modelo": "gemini-x", "usuario": "ana"},
+    )
+    assert r.json()["respaldo"] == {"proveedor": "google", "modelo": "gemini-x"}
+    assert main.respaldo_de_la_ui() is not None
+    r = cliente.put(
+        "/config/llm/respaldo",
+        headers=ADMIN,
+        json={"proveedor": "deepseek", "modelo": "deepseek-chat", "usuario": "ana"},
+    )
+    assert r.status_code == 422  # igual al principal
+    r = cliente.put(
+        "/config/llm/respaldo", headers=ADMIN, json={"proveedor": None, "usuario": "ana"}
+    )
+    assert r.json()["respaldo"]["proveedor"] is None and main.respaldo_de_la_ui() is None

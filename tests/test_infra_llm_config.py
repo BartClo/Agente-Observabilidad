@@ -25,7 +25,10 @@ def _limpio(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     yield
     with psycopg.connect(os.environ["DATABASE_URL"], autocommit=True) as conn:
         conn.execute("DELETE FROM aiops_llm_credenciales")
-        conn.execute("UPDATE aiops_llm_activo SET proveedor = NULL, modelo = NULL WHERE id = true")
+        conn.execute(
+            "UPDATE aiops_llm_activo SET proveedor = NULL, modelo = NULL, "
+            "respaldo_proveedor = NULL, respaldo_modelo = NULL WHERE id = true"
+        )
         conn.execute("DELETE FROM aiops_eventos_auditoria WHERE incidente_id = 'config:llm'")
 
 
@@ -129,3 +132,43 @@ def test_validaciones() -> None:
         llm_config.guardar_api_key("openai", "   ", "admin")
     with pytest.raises(ConfigLLMError, match="no hay API key"):
         llm_config.probar("openai", "modelo-x")
+
+
+def test_el_cliente_del_llm_tiene_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+    """RNF de confiabilidad: ningun proveedor queda sin timeout (todos aceptan el kwarg)."""
+    monkeypatch.setenv("AIOPS_LLM_TIMEOUT_S", "7")
+    for proveedor in llm_config.PROVEEDORES:
+        modelo = llm_config.construir(proveedor, "modelo-x", "clave-1234")
+        # cada integracion lo guarda con su nombre (Anthropic: default_request_timeout)
+        nombres = ("request_timeout", "default_request_timeout", "timeout")
+        assert 7.0 in {getattr(modelo, a, None) for a in nombres}, proveedor
+        assert modelo.max_retries == 2, proveedor  # type: ignore[attr-defined]
+
+
+def test_respaldo_exige_key_y_distinto_del_principal() -> None:
+    assert llm_config.modelo_respaldo() is None
+    with pytest.raises(ConfigLLMError, match="primero cargar"):
+        llm_config.seleccionar_respaldo("google", "gemini-x", "admin")
+    llm_config.guardar_api_key("deepseek", "sk-deepseek-1234", "admin")
+    llm_config.guardar_api_key("google", "AIza-5678", "admin")
+    llm_config.seleccionar("deepseek", "deepseek-chat", "admin")
+    with pytest.raises(ConfigLLMError, match="mismo modelo"):
+        llm_config.seleccionar_respaldo("deepseek", "deepseek-chat", "admin")
+    with pytest.raises(ConfigLLMError, match="modelo invalido"):
+        llm_config.seleccionar_respaldo("google", "malo; x", "admin")
+
+    llm_config.seleccionar_respaldo("google", "gemini-x", "admin")
+    modelo, etiqueta = llm_config.modelo_respaldo()  # type: ignore[misc]
+    assert etiqueta == "google:gemini-x" and type(modelo).__name__ == "ChatGoogleGenerativeAI"
+    assert llm_config.estado()["respaldo"] == {"proveedor": "google", "modelo": "gemini-x"}
+    # el principal sigue siendo el principal
+    assert llm_config.estado()["activo"]["proveedor"] == "deepseek"
+    llm_config.seleccionar_respaldo(None, None, "admin")
+    assert llm_config.modelo_respaldo() is None
+
+
+def test_borrar_la_key_del_respaldo_lo_quita() -> None:
+    llm_config.guardar_api_key("google", "AIza-5678", "admin")
+    llm_config.seleccionar_respaldo("google", "gemini-x", "admin")
+    llm_config.borrar_api_key("google", "admin")
+    assert llm_config.estado()["respaldo"] == {"proveedor": None, "modelo": None}

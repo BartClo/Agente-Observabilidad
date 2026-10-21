@@ -7,6 +7,7 @@ validado): el LLM no puede inyectar comandos ni parametros arbitrarios.
 from __future__ import annotations
 
 import re
+import threading
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -49,11 +50,43 @@ def validar_servicio(servicio: str) -> str:
     return servicio
 
 
+class AccionSinRespuesta(TimeoutError):
+    """El backend no respondio dentro de `timeout_s` (reloj real). El resultado es
+    INCIERTO: la accion pudo haberse aplicado igual. Quien la recibe no debe reintentar
+    a ciegas sino verificar y, si no hay recuperacion, escalar."""
+
+
 def ejecutar_accion(backend: BackendAcciones, accion: str, servicio: str) -> str:
+    """Timeout operacional (tesis, RNF de confiabilidad): `timeout_s` es un limite de
+    reloj sobre TODA la accion, no por operacion de socket. El timeout de urllib solo
+    acota cada lectura: una API lenta que entrega bytes de a poco, o un handshake TLS
+    trabado, lo esquivan (corrida del 2026-10-08: 810 s en un rollout restart)."""
     definicion = ACCIONES_PERMITIDAS.get(accion)
     if definicion is None:
         raise AccionNoPermitida(f"Accion fuera de la lista autorizada: {accion!r}")
-    return backend.ejecutar(accion, validar_servicio(servicio), definicion.timeout_s)
+    servicio = validar_servicio(servicio)
+    resultado: list[str] = []
+    error: list[BaseException] = []
+
+    def _correr() -> None:
+        try:
+            resultado.append(backend.ejecutar(accion, servicio, definicion.timeout_s))
+        except BaseException as exc:  # se re-lanza en el hilo que espera
+            error.append(exc)
+
+    # ponytail: el hilo colgado no se puede matar en Python; queda daemon y muere con el
+    # proceso. Un backend que cuelga seguido se arregla en el backend, no aca.
+    hilo = threading.Thread(target=_correr, name=f"accion-{accion}", daemon=True)
+    hilo.start()
+    hilo.join(definicion.timeout_s)
+    if hilo.is_alive():
+        raise AccionSinRespuesta(
+            f"{accion} sin respuesta en {definicion.timeout_s}s: resultado incierto "
+            "(pudo aplicarse). Verificar; si no recupera, escalar sin reintentar."
+        )
+    if error:
+        raise error[0]
+    return resultado[0]
 
 
 class BackendDeshabilitado:

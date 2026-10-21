@@ -21,6 +21,7 @@ from domain.aiops_core.modelos import (
     Aprobacion,
     Estado,
     Incidente,
+    NivelAutonomia,
     Severidad,
 )
 from domain.aiops_core.observabilidad import ObservabilidadPort
@@ -363,6 +364,53 @@ class Ciclo:
             f"Categoria: {inc.categoria_id} | causa: {inc.causa} | confianza: {inc.confianza}\n"
             f"Acciones realizadas:\n{acciones or '  (ninguna)'}\n"
             f"Evidencia/eventos:\n{eventos}"
+        )
+
+    def reconciliar(self, max_edad_s: float) -> list[str]:
+        """Cierra el hueco que deja un agente que muere o se cuelga a mitad de un
+        incidente (corrida del 2026-10-08: accion ejecutada y nunca verificada). Para
+        cada incidente NO terminal con mas de `max_edad_s` desde su apertura:
+
+        - con acciones: verifica la recuperacion con la señal independiente; si se
+          recupero, lo cierra; si no, lo escala (nunca reintenta la accion);
+        - sin acciones: lo escala (nadie lo atendio a tiempo).
+
+        Quedan fuera los que esperan una aprobacion humana (nivel 2): ese plazo es
+        decision de operaciones, no del agente. Todo queda auditado como `reconciliado`.
+        Devuelve los ids tocados."""
+        tocados: list[str] = []
+        for inc in self.incidentes():
+            if inc.estado in (Estado.RESUELTO, Estado.ESCALADO, Estado.DESCARTADO):
+                continue
+            edad = self._reloj() - inc.abierto_en
+            if edad < max_edad_s or self._espera_aprobacion(inc):
+                continue
+            if inc.acciones:
+                recuperado, detalle = self.verificar(inc.id)
+                if recuperado:
+                    self.auditoria.registrar(inc.id, "reconciliado", destino="cerrado", edad_s=edad)
+                    self.cerrar(inc.id)
+                else:
+                    self.auditoria.registrar(
+                        inc.id, "reconciliado", destino="escalado", edad_s=edad
+                    )
+                    self.escalar(
+                        inc.id,
+                        f"Incidente sin cierre tras {edad:.0f}s: la accion se ejecuto pero "
+                        f"la recuperacion no se comprobo ({detalle}).",
+                    )
+            else:
+                self.auditoria.registrar(inc.id, "reconciliado", destino="escalado", edad_s=edad)
+                self.escalar(inc.id, f"Incidente sin atender tras {edad:.0f}s en {inc.estado}.")
+            tocados.append(inc.id)
+        return tocados
+
+    def _espera_aprobacion(self, inc: Incidente) -> bool:
+        return (
+            self.politica.nivel is NivelAutonomia.CON_APROBACION
+            and inc.estado is Estado.DIAGNOSTICADO
+            and inc.elegible
+            and inc.aprobacion is None
         )
 
     # --- internos -----------------------------------------------------------------

@@ -176,3 +176,15 @@ def test_rotacion_de_token_sin_corte(monkeypatch: pytest.MonkeyPatch) -> None:
         r = c.get("/kill-switch", headers={"Authorization": f"Bearer {token}"})
         assert r.status_code == esperado, token
     assert c.get("/kill-switch", headers={"Authorization": "viejo"}).status_code == 401
+
+
+def test_reconciliar_escala_lo_que_quedo_sin_atender(
+    cliente: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("AIOPS_RECONCILIAR_EDAD_S", "0")
+    ciclo = runtime.get_ciclo()
+    inc = ciclo.abrir(ciclo.alertas_activas()[0].split(" | ")[0])
+    assert cliente.post("/reconciliar").status_code == 401
+    r = cliente.post("/reconciliar", headers=HEADERS)
+    assert r.json() == {"reconciliados": [inc.id]}
+    assert cliente.get(f"/incidentes/{inc.id}", headers=HEADERS).json()["estado"] == "escalado"

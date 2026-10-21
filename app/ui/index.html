@@ -130,6 +130,15 @@
         <button id="llm-usar" class="primario">Usar este modelo</button>
         <button id="llm-default">Volver al default</button>
       </div>
+      <div class="barra" style="margin-top:8px">
+        <strong>Respaldo</strong>
+        <label>Proveedor <select id="resp-prov"></select></label>
+        <label>Modelo <input id="resp-modelo" size="24" spellcheck="false"></label>
+        <button id="resp-usar">Usar como respaldo</button>
+        <button id="resp-quitar">Quitar</button>
+        <span id="resp-activo" class="mono"></span>
+      </div>
+      <p class="sub">Si el modelo principal falla a mitad de un incidente, el respaldo lo retoma desde donde quedó.</p>
       <p class="sub">Cambiar el modelo durante un experimento invalida la comparación entre corridas.
         La key se guarda cifrada y no se vuelve a mostrar.</p>
     </div>
@@ -318,6 +327,10 @@ function pintarLLM(cfg) {
     const o = el("option", p.nombre + (p.configurada ? "" : " (sin key)")); o.value = p.id; o.dataset.ejemplo = p.ejemplo;
     sel.append(o);
   }
+  const rsel = $("resp-prov"); const rprevio = rsel.value; rsel.replaceChildren();
+  for (const p of cfg.proveedores) { const o = el("option", p.nombre + (p.configurada ? "" : " (sin key)")); o.value = p.id; rsel.append(o); }
+  rsel.value = rprevio || cfg.respaldo.proveedor || cfg.proveedores[0].id;
+  $("resp-activo").textContent = cfg.respaldo.proveedor ? `Respaldo: ${cfg.respaldo.proveedor}:${cfg.respaldo.modelo}` : "Sin respaldo";
   sel.value = previo || a.proveedor || cfg.proveedores[0].id;
   if (a.proveedor && !$("llm-modelo").value) $("llm-modelo").value = a.modelo;
   $("llm-modelo").placeholder = sel.selectedOptions[0]?.dataset.ejemplo || "";
@@ -336,6 +349,10 @@ $("llm-prov").addEventListener("change", () => { $("llm-modelo").placeholder = $
 $("llm-usar").addEventListener("click", () => accionLLM("/config/llm/activo",
   { method: "PUT", body: JSON.stringify({ proveedor: $("llm-prov").value, modelo: $("llm-modelo").value.trim(), usuario: usuarioActual() }) }));
 $("llm-default").addEventListener("click", () => accionLLM("/config/llm/activo",
+  { method: "PUT", body: JSON.stringify({ proveedor: null, usuario: usuarioActual() }) }));
+$("resp-usar").addEventListener("click", () => accionLLM("/config/llm/respaldo",
+  { method: "PUT", body: JSON.stringify({ proveedor: $("resp-prov").value, modelo: $("resp-modelo").value.trim(), usuario: usuarioActual() }) }));
+$("resp-quitar").addEventListener("click", () => accionLLM("/config/llm/respaldo",
   { method: "PUT", body: JSON.stringify({ proveedor: null, usuario: usuarioActual() }) }));
 $("llm-probar").addEventListener("click", async () => {
   $("estado").textContent = "Probando…";

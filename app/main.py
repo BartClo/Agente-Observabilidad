@@ -31,6 +31,19 @@ def modelo_de_la_ui() -> tuple[Any, str] | None:
     return modelo_activo()
 
 
+def respaldo_de_la_ui() -> tuple[Any, str] | None:
+    """Modelo de respaldo elegido en la UI, o None. Un respaldo mal configurado (key que
+    ya no se puede descifrar, p. ej.) nunca debe impedir atender el incidente."""
+    if not os.environ.get("DATABASE_URL"):
+        return None
+    from infra.llm_config import ConfigLLMError, modelo_respaldo
+
+    try:
+        return modelo_respaldo()
+    except ConfigLLMError:
+        return None
+
+
 def build_agent(modelo: Any = None) -> Any:
     """`modelo`: un BaseChatModel ya armado (p. ej. el de modelo_de_la_ui()). Lo usan el
     orquestador y todos los subagentes. Sin modelo, cada uno usa el suyo por defecto

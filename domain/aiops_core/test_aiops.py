@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
+import threading
 from pathlib import Path
 
 import pytest
 
 from domain.aiops_core import metricas
 from domain.aiops_core.acciones import (
+    ACCIONES_PERMITIDAS,
+    AccionDef,
     AccionNoPermitida,
+    AccionSinRespuesta,
     BackendDeshabilitado,
     ejecutar_accion,
     validar_servicio,
@@ -59,6 +63,52 @@ def preparar(ciclo: Ciclo, alerta_id: str, confianza: float = 0.95) -> str:
 
 
 # --- catalogo / acciones ------------------------------------------------------------
+
+
+class BackendColgado:
+    """Simula una API que no responde (corrida real del 2026-10-08: 810 s)."""
+
+    def __init__(self) -> None:
+        self.liberar = threading.Event()
+
+    def ejecutar(self, accion: str, servicio: str, timeout_s: int) -> str:
+        self.liberar.wait(30)  # ignora el timeout que se le pasa, como un socket trabado
+        return "tarde"
+
+
+@pytest.fixture
+def timeout_corto(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setitem(
+        ACCIONES_PERMITIDAS, "restart_service", AccionDef("restart_service", "x", "bajo", 1)
+    )
+
+
+def test_timeout_operacional_es_de_reloj_no_del_backend(timeout_corto: None) -> None:
+    backend = BackendColgado()
+    try:
+        with pytest.raises(AccionSinRespuesta, match="incierto"):
+            ejecutar_accion(backend, "restart_service", "checkout")
+    finally:
+        backend.liberar.set()
+
+
+def test_error_del_backend_se_propaga_tal_cual() -> None:
+    with pytest.raises(RuntimeError, match="No hay backend"):
+        ejecutar_accion(BackendDeshabilitado(), "restart_service", "checkout")
+
+
+def test_ciclo_registra_accion_sin_respuesta_como_fallida(timeout_corto: None) -> None:
+    ciclo, _, alerta_id = armar()
+    inc_id = preparar(ciclo, alerta_id)
+    backend = BackendColgado()
+    ciclo._backend = backend  # noqa: SLF001  (el resto del ciclo, intacto)
+    try:
+        res = ciclo.ejecutar_remediacion(inc_id, aprobada=False)
+    finally:
+        backend.liberar.set()
+    assert not res.ejecutada and "incierto" in res.mensaje
+    accion = ciclo.incidente(inc_id).acciones[-1]
+    assert not accion.ok and "AccionSinRespuesta" in accion.resultado
 
 
 def test_senal_y_catalogo() -> None:
@@ -720,3 +770,50 @@ def test_metricas_casos_borde() -> None:
         metricas.reduccion_mttr(0, 1)
     with pytest.raises(ValueError):
         metricas.tasa_rollback([])
+
+
+# --- reconciliador de incidentes colgados -------------------------------------------
+
+
+def test_reconciliar_cierra_lo_que_se_recupero_aunque_el_agente_murio() -> None:
+    ciclo, _, alerta_id = armar()
+    inc_id = preparar(ciclo, alerta_id)
+    ciclo.ejecutar_remediacion(inc_id, aprobada=False)  # el agente muere aca: sin verificar
+    assert ciclo.reconciliar(max_edad_s=1) == [inc_id]
+    inc = ciclo.incidente(inc_id)
+    assert inc.estado is Estado.RESUELTO and inc.verificado
+    assert [e.datos["destino"] for e in ciclo.auditoria.eventos if e.tipo == "reconciliado"] == [
+        "cerrado"
+    ]
+
+
+def test_reconciliar_escala_si_la_accion_no_recupero() -> None:
+    ciclo, _, alerta_id = armar()
+    inc_id = preparar(ciclo, alerta_id)
+    ciclo._backend = BackendDeshabilitado()  # noqa: SLF001  (la accion falla, nada se arregla)
+    ciclo.ejecutar_remediacion(inc_id, aprobada=False)
+    assert ciclo.reconciliar(max_edad_s=1) == [inc_id]
+    inc = ciclo.incidente(inc_id)
+    assert inc.estado is Estado.ESCALADO and inc.intervencion_humana
+    assert inc.motivo_escalamiento and "no se comprobo" in inc.motivo_escalamiento
+    assert len(inc.acciones) == 1  # nunca reintenta la accion
+
+
+def test_reconciliar_escala_lo_que_nadie_atendio() -> None:
+    ciclo, _, alerta_id = armar()
+    inc_id = ciclo.abrir(alerta_id).id
+    assert ciclo.reconciliar(max_edad_s=1) == [inc_id]
+    assert ciclo.incidente(inc_id).estado is Estado.ESCALADO
+
+
+def test_reconciliar_respeta_lo_reciente_lo_terminado_y_la_aprobacion_pendiente() -> None:
+    ciclo, _, alerta_id = armar()
+    inc_id = ciclo.abrir(alerta_id).id
+    assert ciclo.reconciliar(max_edad_s=10**6) == []  # muy reciente
+    ciclo.escalar(inc_id, "a mano")
+    assert ciclo.reconciliar(max_edad_s=1) == []  # ya terminado
+
+    c2, _, alerta2 = armar(nivel=NivelAutonomia.CON_APROBACION)
+    esperando = preparar(c2, alerta2)  # diagnosticado, elegible, nadie aprobo
+    assert c2.reconciliar(max_edad_s=1) == []
+    assert c2.incidente(esperando).estado is Estado.DIAGNOSTICADO

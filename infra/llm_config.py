@@ -117,6 +117,11 @@ def borrar_api_key(proveedor: str, usuario: str, database_url: str | None = None
             "actualizado_en = now() WHERE id = true AND proveedor = %s",
             (usuario, prov.id),
         )
+        conn.execute(
+            "UPDATE aiops_llm_activo SET respaldo_proveedor = NULL, respaldo_modelo = NULL "
+            "WHERE id = true AND respaldo_proveedor = %s",
+            (prov.id,),
+        )
         _auditar(conn, "llm_key_borrada", proveedor=prov.id, usuario=usuario)
 
 
@@ -150,6 +155,40 @@ def seleccionar(
         _auditar(conn, "llm_seleccion", proveedor=prov.id, modelo=modelo.strip(), usuario=usuario)
 
 
+def seleccionar_respaldo(
+    proveedor: str | None, modelo: str | None, usuario: str, database_url: str | None = None
+) -> None:
+    """Modelo alternativo si el principal falla en medio de un incidente. `proveedor=None`
+    lo quita. Mismas reglas que `seleccionar` (key cargada, nombre valido) y no puede ser
+    el mismo par proveedor+modelo que el principal: no seria un respaldo."""
+    with psycopg.connect(_url(database_url), autocommit=True) as conn:
+        if proveedor is None:
+            conn.execute(
+                "UPDATE aiops_llm_activo SET respaldo_proveedor = NULL, respaldo_modelo = NULL "
+                "WHERE id = true"
+            )
+            _auditar(conn, "llm_respaldo", proveedor=None, modelo=None, usuario=usuario)
+            return
+        prov = _proveedor(proveedor)
+        if not modelo or not _MODELO_VALIDO.fullmatch(modelo.strip()):
+            raise ConfigLLMError("nombre de modelo invalido")
+        if not conn.execute(
+            "SELECT 1 FROM aiops_llm_credenciales WHERE proveedor = %s", (prov.id,)
+        ).fetchone():
+            raise ConfigLLMError(f"primero cargar la API key de {prov.nombre}")
+        principal = conn.execute(
+            "SELECT proveedor, modelo FROM aiops_llm_activo WHERE id = true"
+        ).fetchone()
+        if principal and (principal[0], principal[1]) == (prov.id, modelo.strip()):
+            raise ConfigLLMError("el respaldo no puede ser el mismo modelo que el principal")
+        conn.execute(
+            "UPDATE aiops_llm_activo SET respaldo_proveedor = %s, respaldo_modelo = %s "
+            "WHERE id = true",
+            (prov.id, modelo.strip()),
+        )
+        _auditar(conn, "llm_respaldo", proveedor=prov.id, modelo=modelo.strip(), usuario=usuario)
+
+
 def estado(database_url: str | None = None) -> dict[str, Any]:
     """Lo que puede ver la UI. Nunca incluye una API key."""
     with psycopg.connect(_url(database_url), autocommit=True) as conn:
@@ -161,8 +200,8 @@ def estado(database_url: str | None = None) -> dict[str, Any]:
             ).fetchall()
         }
         activo = conn.execute(
-            "SELECT proveedor, modelo, actualizado_por, actualizado_en FROM aiops_llm_activo "
-            "WHERE id = true"
+            "SELECT proveedor, modelo, actualizado_por, actualizado_en, "
+            "respaldo_proveedor, respaldo_modelo FROM aiops_llm_activo WHERE id = true"
         ).fetchone()
     return {
         "proveedores": [
@@ -181,6 +220,10 @@ def estado(database_url: str | None = None) -> dict[str, Any]:
             "proveedor": activo[0] if activo else None,
             "modelo": activo[1] if activo else None,
             "actualizado_por": activo[2] if activo else None,
+        },
+        "respaldo": {
+            "proveedor": activo[4] if activo else None,
+            "modelo": activo[5] if activo else None,
         },
     }
 
@@ -207,7 +250,16 @@ def _credencial(proveedor: str, database_url: str | None) -> str:
 def construir(proveedor: str, modelo: str, api_key: str) -> BaseChatModel:
     from langchain.chat_models import init_chat_model
 
-    return init_chat_model(modelo, model_provider=_proveedor(proveedor).langchain, api_key=api_key)
+    # Timeout operacional (tesis, RNF de confiabilidad): una llamada colgada al proveedor
+    # no puede dejar el incidente a medias. Por llamada; el job completo lo acota RQ
+    # (AIOPS_JOB_TIMEOUT_S). Pocos reintentos: cada uno suma espera al MTTR.
+    return init_chat_model(
+        modelo,
+        model_provider=_proveedor(proveedor).langchain,
+        api_key=api_key,
+        timeout=float(os.environ.get("AIOPS_LLM_TIMEOUT_S", "120")),
+        max_retries=int(os.environ.get("AIOPS_LLM_REINTENTOS", "2")),
+    )
 
 
 def modelo_activo(database_url: str | None = None) -> tuple[BaseChatModel, str] | None:
@@ -216,6 +268,20 @@ def modelo_activo(database_url: str | None = None) -> tuple[BaseChatModel, str] 
     with psycopg.connect(_url(database_url), autocommit=True) as conn:
         fila = conn.execute(
             "SELECT proveedor, modelo FROM aiops_llm_activo WHERE id = true"
+        ).fetchone()
+    if not fila or not fila[0]:
+        return None
+    proveedor, modelo = fila
+    return construir(
+        proveedor, modelo, _credencial(proveedor, database_url)
+    ), f"{proveedor}:{modelo}"
+
+
+def modelo_respaldo(database_url: str | None = None) -> tuple[BaseChatModel, str] | None:
+    """(modelo, "proveedor:modelo") del respaldo, o None si no hay uno configurado."""
+    with psycopg.connect(_url(database_url), autocommit=True) as conn:
+        fila = conn.execute(
+            "SELECT respaldo_proveedor, respaldo_modelo FROM aiops_llm_activo WHERE id = true"
         ).fetchone()
     if not fila or not fila[0]:
         return None

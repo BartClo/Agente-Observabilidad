@@ -75,7 +75,11 @@ def armar(*, persistencia: str | None = None) -> Ciclo:
         from infra.kill_switch import kill_switch_postgres
 
         repositorio = RepositorioIncidentesPostgres()
-        on_evento = crear_sink_postgres()
+        # Postgres primero (la auditoria es la fuente de verdad); despues los avisos a
+        # Google Chat, que si no hay webhook configurado no existen (sink None).
+        from agents.aiops import notificaciones
+
+        on_evento = notificaciones.componer(crear_sink_postgres(), notificaciones.crear_sink())
         politica = Politica(
             nivel=politica.nivel,
             entornos_permitidos=politica.entornos_permitidos,

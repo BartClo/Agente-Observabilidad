@@ -126,3 +126,26 @@ def test_firing_registra_tokens_aunque_el_agente_falle(monkeypatch: pytest.Monke
     assert inc is not None and (inc.tokens_entrada, inc.tokens_salida) == (700, 70)
     # sin modelo elegido en la UI queda registrado el default
     assert inc.modelo_llm is not None and inc.modelo_llm.startswith("default:")
+
+
+def test_el_barrido_de_colgados_nunca_impide_atender_la_alerta(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agents.aiops.worker_jobs import reconciliar_colgados
+
+    class CicloRoto:
+        def reconciliar(self, edad: float) -> list[str]:
+            raise RuntimeError("postgres caido")
+
+    assert reconciliar_colgados(CicloRoto()) == []  # type: ignore[arg-type]
+
+    class CicloOk:
+        visto = 0.0
+
+        def reconciliar(self, edad: float) -> list[str]:
+            CicloOk.visto = edad
+            return ["INC-1"]
+
+    monkeypatch.setenv("AIOPS_RECONCILIAR_EDAD_S", "42")
+    assert reconciliar_colgados(CicloOk()) == ["INC-1"]  # type: ignore[arg-type]
+    assert CicloOk.visto == 42.0

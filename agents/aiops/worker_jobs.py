@@ -14,6 +14,7 @@ del agente vean el incidente (con un agente falso). Que el LLM real
 
 from __future__ import annotations
 
+import logging
 import os
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -21,7 +22,9 @@ from typing import Any
 
 from agents.aiops import runtime
 from domain.aiops_core.ciclo import Ciclo
-from domain.aiops_core.modelos import Alerta, Severidad
+from domain.aiops_core.modelos import Alerta, Estado, Severidad
+
+logger = logging.getLogger(__name__)
 
 
 class ServicioOcupado(RuntimeError):
@@ -74,6 +77,7 @@ def procesar_alerta_webhook(alerta_dict: dict[str, Any], es_firing: bool) -> str
     del proceso (ver runtime.armar)."""
     alerta = _alerta_desde_dict(alerta_dict)
     ciclo = runtime.armar(persistencia="postgres")
+    reconciliar_colgados(ciclo)
     if not es_firing:
         ciclo.notificar_resuelta_en_origen(alerta)
         return f"{alerta.id}: resuelta en origen, auditada (sin cerrar)"
@@ -82,6 +86,19 @@ def procesar_alerta_webhook(alerta_dict: dict[str, Any], es_firing: bool) -> str
         inc = ciclo.abrir_desde_alerta(alerta)
         atender_con_agente(ciclo, inc.id, alerta)
     return f"{inc.id} procesado por el agente"
+
+
+def reconciliar_colgados(ciclo: Ciclo) -> list[str]:
+    """Barrido de incidentes que quedaron a medias (agente caido o colgado), al inicio de
+    cada job. Best-effort: un fallo aca nunca impide atender la alerta nueva.
+    ponytail: solo corre cuando llega una alerta (o POST /reconciliar desde un cron);
+    un scheduler propio si hace falta cerrar sin trafico de alertas."""
+    try:
+        edad = float(os.environ.get("AIOPS_RECONCILIAR_EDAD_S", "1800"))
+        return ciclo.reconciliar(edad)
+    except Exception:
+        logger.exception("reconciliacion de incidentes colgados fallo")
+        return []
 
 
 def atender_con_agente(ciclo: Ciclo, incidente_id: str, alerta: Alerta) -> None:
@@ -95,7 +112,7 @@ def atender_con_agente(ciclo: Ciclo, incidente_id: str, alerta: Alerta) -> None:
 
     from langchain_core.callbacks import UsageMetadataCallbackHandler
 
-    from app.main import ORCHESTRATOR_MODEL, build_agent, modelo_de_la_ui
+    from app.main import ORCHESTRATOR_MODEL, build_agent, modelo_de_la_ui, respaldo_de_la_ui
 
     pedido = (
         f"Atiende el incidente {incidente_id} (alerta {alerta.nombre} en {alerta.servicio}, "
@@ -106,17 +123,65 @@ def atender_con_agente(ciclo: Ciclo, incidente_id: str, alerta: Alerta) -> None:
     # orquestador subestimaria el costo (Fase 6).
     # Modelo elegido desde la UI (si hay); si no, el de agent.yaml / ORCHESTRATOR_MODEL.
     activo = modelo_de_la_ui()
-    modelo, etiqueta = activo if activo else (None, f"default:{ORCHESTRATOR_MODEL}")
+    principal = activo if activo else (None, f"default:{ORCHESTRATOR_MODEL}")
+    respaldo = respaldo_de_la_ui()
+    corridas = [principal] + ([respaldo] if respaldo else [])
     uso = UsageMetadataCallbackHandler()
+    usados: list[str] = []
+    primer_error: Exception | None = None
     try:
-        build_agent(modelo).invoke(
-            {"messages": [{"role": "user", "content": pedido}]},
-            config={"callbacks": [uso]},
-        )
+        for i, (modelo, etiqueta) in enumerate(corridas):
+            usados.append(etiqueta)
+            try:
+                build_agent(modelo).invoke(
+                    {
+                        "messages": [
+                            {"role": "user", "content": pedido if i == 0 else _retomar(pedido)}
+                        ]
+                    },
+                    config={"callbacks": [uso]},
+                )
+                primer_error = None
+                break
+            except Exception as exc:
+                primer_error = primer_error or exc
+                # El estado vive en el Ciclo, no en el contexto del LLM: el respaldo puede
+                # retomar el incidente donde quedo. Si ya termino, no hay nada que retomar.
+                if ciclo.incidente(incidente_id).estado in _TERMINALES or i + 1 >= len(corridas):
+                    break
+                logger.warning(
+                    "%s fallo (%s): se retoma con %s",
+                    etiqueta,
+                    type(exc).__name__,
+                    corridas[i + 1][1],
+                )
+                ciclo.auditoria.registrar(
+                    incidente_id,
+                    "llm_respaldo",
+                    desde=etiqueta,
+                    hacia=corridas[i + 1][1],
+                    error=type(exc).__name__,
+                )
+        if primer_error is not None:
+            raise primer_error
     finally:
         # Tambien si el agente fallo a mitad: los tokens gastados igual cuestan.
         entrada, salida = tokens_de(uso.usage_metadata)
-        ciclo.registrar_costo_llm(incidente_id, entrada=entrada, salida=salida, modelo=etiqueta)
+        ciclo.registrar_costo_llm(
+            incidente_id, entrada=entrada, salida=salida, modelo=" -> ".join(usados)
+        )
+
+
+_TERMINALES = (Estado.RESUELTO, Estado.ESCALADO, Estado.DESCARTADO)
+
+
+def _retomar(pedido: str) -> str:
+    return (
+        f"{pedido} Un intento anterior con otro modelo se interrumpio y el incidente puede "
+        "estar a medias: consulta `estado_incidente` y continua desde el paso en que quedo, "
+        "sin repetir lo que ya se hizo. Si ya se ejecuto una accion, verifica antes de "
+        "volver a actuar."
+    )
 
 
 def tokens_de(uso_por_modelo: dict[str, Any]) -> tuple[int, int]:
