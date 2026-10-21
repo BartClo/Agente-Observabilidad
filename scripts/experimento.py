@@ -108,6 +108,8 @@ COLUMNAS = [
     "mttr_s",
     "tokens_entrada",
     "tokens_salida",
+    "turnos_llm",
+    "llamadas_tools",
     "modelo_llm",
     "motivo_escalamiento",
     "error",
@@ -290,6 +292,8 @@ def correr(cat: str, n: int, modo: str, nivel: int, puerto: str) -> dict[str, ob
         cerrado_en=d.get("cerrado_en") or "",
         tokens_entrada=d.get("tokens_entrada") or 0,
         tokens_salida=d.get("tokens_salida") or 0,
+        turnos_llm=d.get("turnos_llm") or 0,
+        llamadas_tools=d.get("llamadas_tools") or 0,
         modelo_llm=d.get("modelo_llm") or "",
         motivo_escalamiento=d.get("motivo_escalamiento") or "",
     )

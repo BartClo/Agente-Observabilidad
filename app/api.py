@@ -179,6 +179,8 @@ def _resumen(inc: Incidente) -> dict[str, Any]:
         "cerrado_en": inc.cerrado_en,
         "tokens_entrada": inc.tokens_entrada,
         "tokens_salida": inc.tokens_salida,
+        "turnos_llm": inc.turnos_llm,
+        "llamadas_tools": inc.llamadas_tools,
         "modelo_llm": inc.modelo_llm,
     }
 
@@ -291,6 +293,7 @@ def ver_metricas() -> dict[str, Any]:
         ("mttr_segundos", metricas.mttr),
         ("tasa_rollback", metricas.tasa_rollback),
         ("tokens_por_incidente", metricas.tokens_por_incidente),
+        ("turnos_por_incidente", metricas.turnos_por_incidente),
     ):
         try:
             resultado[nombre] = fn(incidentes)

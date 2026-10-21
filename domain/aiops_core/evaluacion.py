@@ -49,6 +49,7 @@ class Corrida:
     disparada_en: float | None
     cerrado_en: float | None
     tokens: int = 0
+    turnos: int = 0
 
     @classmethod
     def desde_fila(cls, f: Mapping[str, str]) -> Corrida:
@@ -64,6 +65,7 @@ class Corrida:
             disparada_en=_float(f.get("disparada_en", "")),
             cerrado_en=_float(f.get("cerrado_en", "")),
             tokens=int(f.get("tokens_entrada") or 0) + int(f.get("tokens_salida") or 0),
+            turnos=int(f.get("turnos_llm") or 0),
         )
 
     @property

@@ -91,6 +91,10 @@ class Incidente:
     tokens_salida: int = 0
     # "proveedor:modelo" que atendio el incidente: comparar corridas exige saberlo.
     modelo_llm: str | None = None
+    # Esfuerzo del agente (metrica 6.5 de la tesis): llamadas al LLM y a tools. Las tools
+    # incluyen las internas del framework (task, write_todos...), no solo las del ciclo.
+    turnos_llm: int = 0
+    llamadas_tools: int = 0
 
     @property
     def intentos(self) -> int:

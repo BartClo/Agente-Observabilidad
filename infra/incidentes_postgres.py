@@ -73,6 +73,8 @@ def _desde_dict(d: dict[str, Any]) -> Incidente:
         tokens_entrada=d.get("tokens_entrada", 0),
         tokens_salida=d.get("tokens_salida", 0),
         modelo_llm=d.get("modelo_llm"),
+        turnos_llm=d.get("turnos_llm", 0),
+        llamadas_tools=d.get("llamadas_tools", 0),
     )
 
 

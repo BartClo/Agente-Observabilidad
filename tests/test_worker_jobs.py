@@ -111,7 +111,7 @@ def test_firing_registra_tokens_aunque_el_agente_falle(monkeypatch: pytest.Monke
 
     class AgenteQueGastaYFalla:
         def invoke(self, entrada: dict[str, Any], config: dict[str, Any]) -> dict[str, Any]:
-            (cb,) = config["callbacks"]
+            (cb,) = [h for h in config["callbacks"] if hasattr(h, "usage_metadata")]
             cb.usage_metadata["modelo-x"] = {"input_tokens": 700, "output_tokens": 70}
             raise RuntimeError("el LLM se cayo")
 

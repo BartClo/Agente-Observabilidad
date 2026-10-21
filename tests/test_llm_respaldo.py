@@ -14,18 +14,32 @@ import psycopg
 import pytest
 
 from agents.aiops import runtime
-from agents.aiops.worker_jobs import atender_con_agente
+from agents.aiops.worker_jobs import ContadorTurnos, atender_con_agente
 from domain.aiops_core.modelos import Alerta, Estado, Severidad
 
 
 class AgenteFalso:
-    def __init__(self, *, falla: Exception | None = None, escala: Any = None) -> None:
+    def __init__(
+        self,
+        *,
+        falla: Exception | None = None,
+        escala: Any = None,
+        turnos: int = 0,
+        tools: int = 0,
+    ) -> None:
         self.falla = falla
         self.escala = escala
+        self.turnos = turnos
+        self.tools = tools
         self.pedidos: list[str] = []
 
     def invoke(self, entrada: dict[str, Any], config: dict[str, Any]) -> None:
         self.pedidos.append(entrada["messages"][0]["content"])
+        (contador,) = [h for h in config["callbacks"] if isinstance(h, ContadorTurnos)]
+        for _ in range(self.turnos):
+            contador.on_chat_model_start({}, [])
+        for _ in range(self.tools):
+            contador.on_tool_start({}, "")
         if self.escala is not None:
             self.escala()
         if self.falla is not None:
@@ -62,8 +76,10 @@ def test_si_el_principal_falla_el_respaldo_retoma(
     incidente: tuple[Any, str, Alerta], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     ciclo, inc_id, alerta = incidente
-    principal = AgenteFalso(falla=ConnectionError("proveedor caido"))
-    respaldo = AgenteFalso(escala=lambda: ciclo.escalar(inc_id, "lo resolvio el respaldo"))
+    principal = AgenteFalso(falla=ConnectionError("proveedor caido"), turnos=2, tools=1)
+    respaldo = AgenteFalso(
+        escala=lambda: ciclo.escalar(inc_id, "lo resolvio el respaldo"), turnos=1, tools=3
+    )
     _usar(monkeypatch, principal, respaldo)
 
     atender_con_agente(ciclo, inc_id, alerta)  # no lanza: el respaldo termino el trabajo
@@ -74,6 +90,8 @@ def test_si_el_principal_falla_el_respaldo_retoma(
     inc = ciclo.incidente(inc_id)
     assert inc.estado is Estado.ESCALADO
     assert inc.modelo_llm == "deepseek:deepseek-chat -> google:gemini-x"
+    # el esfuerzo de las dos corridas se suma al mismo incidente
+    assert (inc.turnos_llm, inc.llamadas_tools) == (3, 4)
     (evento,) = [e for e in ciclo.auditoria.eventos if e.tipo == "llm_respaldo"]
     assert evento.datos == {
         "desde": "deepseek:deepseek-chat",

@@ -748,17 +748,23 @@ def test_costo_llm_se_acumula_por_incidente_y_se_promedia() -> None:
     ciclo, env, a1 = armar()
     inc1 = ciclo.abrir(a1).id
     ciclo.registrar_costo_llm(inc1, entrada=1000, salida=200)
-    ciclo.registrar_costo_llm(inc1, entrada=500, salida=100)  # reintento
+    ciclo.registrar_costo_llm(inc1, entrada=500, salida=100, turnos=3, tools=2)  # reintento
     inc2 = ciclo.abrir(env.inyectar_fallo("billing", "disco_lleno").id).id  # sin LLM
     i1 = ciclo.incidente(inc1)
     assert (i1.tokens_entrada, i1.tokens_salida) == (1500, 300)
+    assert (i1.turnos_llm, i1.llamadas_tools) == (3, 2)
+    assert metricas.turnos_por_incidente(ciclo.incidentes()) == 3  # el sin LLM no abarata
     assert metricas.tokens_por_incidente(ciclo.incidentes()) == pytest.approx(1800)
     assert ciclo.incidente(inc2).tokens_entrada == 0
     assert {e.tipo for e in ciclo.auditoria.de_incidente(inc1)} >= {"costo_llm"}
     with pytest.raises(ErrorCiclo, match="negativ"):
         ciclo.registrar_costo_llm(inc1, entrada=-1, salida=0)
+    with pytest.raises(ErrorCiclo, match="negativ"):
+        ciclo.registrar_costo_llm(inc1, entrada=0, salida=0, turnos=-1)
     with pytest.raises(ValueError):
         metricas.tokens_por_incidente([ciclo.incidente(inc2)])
+    with pytest.raises(ValueError):
+        metricas.turnos_por_incidente([ciclo.incidente(inc2)])
 
 
 def test_metricas_casos_borde() -> None:

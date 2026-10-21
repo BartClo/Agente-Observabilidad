@@ -33,8 +33,8 @@ def _fmt(
 def tabla_por_categoria(corridas: Sequence[ev.Corrida]) -> str:
     filas = [
         "| Categoría | n | Elegible | TRA | MTTR | Precisión clasif. "
-        "| Acciones incorrectas | Tokens/inc. |",
-        "|---|---|---|---|---|---|---|---|",
+        "| Acciones incorrectas | Tokens/inc. | Turnos LLM/inc. |",
+        "|---|---|---|---|---|---|---|---|---|",
     ]
     grupos: dict[str, list[ev.Corrida]] = {}
     for c in corridas:
@@ -42,17 +42,19 @@ def tabla_por_categoria(corridas: Sequence[ev.Corrida]) -> str:
     for cat, cs in sorted(grupos.items()):
         con_tokens = [c.tokens for c in cs if c.tokens]
         tokens = f"{sum(con_tokens) / len(con_tokens):.0f}" if con_tokens else "–"
+        con_turnos = [c.turnos for c in cs if c.turnos]
+        turnos = f"{sum(con_turnos) / len(con_turnos):.1f}" if con_turnos else "–"
         filas.append(
             f"| {cat} | {len(cs)} | {'sí' if cs[0].elegible else 'no'} | "
             f"{_fmt(ev.tra, cs, '%')} | {_fmt(ev.mttr, cs, ' s')} | "
             f"{_fmt(ev.precision_clasificacion, cs, '%')} | "
-            f"{ev.tasa_acciones_incorrectas(cs):.1f}% | {tokens} |"
+            f"{ev.tasa_acciones_incorrectas(cs):.1f}% | {tokens} | {turnos} |"
         )
     filas.append(
         f"| **Total** | {len(corridas)} | | {_fmt(ev.tra, corridas, '%')} | "
         f"{_fmt(ev.mttr, corridas, ' s')} | "
         f"{_fmt(ev.precision_clasificacion, corridas, '%')} | "
-        f"{ev.tasa_acciones_incorrectas(corridas):.1f}% | |"
+        f"{ev.tasa_acciones_incorrectas(corridas):.1f}% | | |"
     )
     return "\n".join(filas)
 

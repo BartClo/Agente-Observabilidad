@@ -20,6 +20,8 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import Any
 
+from langchain_core.callbacks import BaseCallbackHandler
+
 from agents.aiops import runtime
 from domain.aiops_core.ciclo import Ciclo
 from domain.aiops_core.modelos import Alerta, Estado, Severidad
@@ -127,6 +129,7 @@ def atender_con_agente(ciclo: Ciclo, incidente_id: str, alerta: Alerta) -> None:
     respaldo = respaldo_de_la_ui()
     corridas = [principal] + ([respaldo] if respaldo else [])
     uso = UsageMetadataCallbackHandler()
+    contador = ContadorTurnos()
     usados: list[str] = []
     primer_error: Exception | None = None
     try:
@@ -139,7 +142,7 @@ def atender_con_agente(ciclo: Ciclo, incidente_id: str, alerta: Alerta) -> None:
                             {"role": "user", "content": pedido if i == 0 else _retomar(pedido)}
                         ]
                     },
-                    config={"callbacks": [uso]},
+                    config={"callbacks": [uso, contador]},
                 )
                 primer_error = None
                 break
@@ -168,8 +171,28 @@ def atender_con_agente(ciclo: Ciclo, incidente_id: str, alerta: Alerta) -> None:
         # Tambien si el agente fallo a mitad: los tokens gastados igual cuestan.
         entrada, salida = tokens_de(uso.usage_metadata)
         ciclo.registrar_costo_llm(
-            incidente_id, entrada=entrada, salida=salida, modelo=" -> ".join(usados)
+            incidente_id,
+            entrada=entrada,
+            salida=salida,
+            modelo=" -> ".join(usados),
+            turnos=contador.turnos,
+            tools=contador.tools,
         )
+
+
+class ContadorTurnos(BaseCallbackHandler):
+    """Cuenta llamadas al LLM (turnos) y a tools de TODA la corrida, incluido el subagente:
+    los callbacks de `config` los heredan los runs hijos."""
+
+    def __init__(self) -> None:
+        self.turnos = 0
+        self.tools = 0
+
+    def on_chat_model_start(self, *args: Any, **kwargs: Any) -> None:
+        self.turnos += 1
+
+    def on_tool_start(self, *args: Any, **kwargs: Any) -> None:
+        self.tools += 1
 
 
 _TERMINALES = (Estado.RESUELTO, Estado.ESCALADO, Estado.DESCARTADO)

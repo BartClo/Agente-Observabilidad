@@ -19,6 +19,7 @@ def _fila(**kw: str) -> dict[str, str]:
         "cerrado_en": "160",
         "tokens_entrada": "1000",
         "tokens_salida": "200",
+        "turnos_llm": "7",
     }
     return {**base, **kw}
 
@@ -29,7 +30,7 @@ def _c(**kw: str) -> ev.Corrida:
 
 def test_corrida_desde_fila_y_derivados() -> None:
     c = _c()
-    assert c.elegible and c.resuelta and c.mttr_s == 60 and c.tokens == 1200
+    assert c.elegible and c.resuelta and c.mttr_s == 60 and c.tokens == 1200 and c.turnos == 7
     assert not c.accion_incorrecta
     sin_cierre = _c(
         estado="escalado",

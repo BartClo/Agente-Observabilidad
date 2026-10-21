@@ -52,6 +52,15 @@ def tokens_por_incidente(incidentes: Sequence[Incidente]) -> float:
     return sum(con_llm) / len(con_llm)
 
 
+def turnos_por_incidente(incidentes: Sequence[Incidente]) -> float:
+    """Llamadas al LLM promedio por incidente (turnos de investigacion), solo entre los
+    que paso el LLM. Mas turnos no implica mejor resultado (ITBench-AA, ORCA-bench)."""
+    turnos = [i.turnos_llm for i in incidentes if i.turnos_llm > 0]
+    if not turnos:
+        raise ValueError("Ningun incidente registra turnos del LLM")
+    return sum(turnos) / len(turnos)
+
+
 def tasa_rollback(incidentes: Sequence[Incidente]) -> float:
     acciones: list[AccionEjecutada] = [a for i in incidentes for a in i.acciones]
     remediaciones = [a for a in acciones if not a.es_rollback]
