@@ -109,12 +109,16 @@ class PrometheusLoki:
             return None  # sin datos = sin evidencia
         return float(resultado[0]["value"][1])
 
-    def logs(self, servicio: str, lineas: int) -> list[str]:
+    def logs(self, servicio: str, lineas: int, desde: float | None = None) -> list[str]:
         if self._loki is None:
             return []
         query = f'{{{self._etiqueta}="{validar_servicio(servicio)}"}}'
         params = urllib.parse.urlencode(
-            {"query": query, "limit": lineas, "start": int((time.time() - 3600) * 1e9)}
+            {
+                "query": query,
+                "limit": lineas,
+                "start": int((desde if desde is not None else time.time() - 3600) * 1e9),
+            }
         )
         datos = self._get(f"{self._loki}/loki/api/v1/query_range?{params}")
         return [

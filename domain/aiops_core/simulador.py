@@ -73,7 +73,7 @@ class EntornoSimulado:
             return None
         return self._metricas.get(servicio, {}).get(nombre, _SANO[nombre])
 
-    def logs(self, servicio: str, lineas: int) -> list[str]:
+    def logs(self, servicio: str, lineas: int, desde: float | None = None) -> list[str]:
         estado = ", ".join(f"{k}={v:g}" for k, v in self._metricas.get(servicio, {}).items())
         return [f"{servicio}: estado simulado [{estado or 'sano'}]"][:lineas]
 

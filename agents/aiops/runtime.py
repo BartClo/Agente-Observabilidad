@@ -92,6 +92,7 @@ def armar(*, persistencia: str | None = None) -> Ciclo:
         verificacion_ventana_s=float(os.environ.get("AIOPS_VERIFY_WINDOW_S", "0")),
         verificacion_intervalo_s=float(os.environ.get("AIOPS_VERIFY_INTERVAL_S", "5")),
         confirmacion_ventana_s=float(os.environ.get("AIOPS_CONFIRM_WINDOW_S", "0")),
+        logs_ventana_s=float(os.environ.get("AIOPS_LOGS_VENTANA_S", "0")),
     )
 
 

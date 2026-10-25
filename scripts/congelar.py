@@ -17,6 +17,8 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
+from scripts.experimento import AISLAMIENTO
+
 RAIZ = Path(__file__).resolve().parent.parent
 API = os.environ.get("EXP_API", "http://localhost:8010")
 RUTA = RAIZ / "resultados" / "congelado.json"
@@ -73,10 +75,8 @@ def construir_registro() -> dict[str, object]:
         "modelo": f"{activo['proveedor']}:{activo['modelo']}",
         "agente": os.environ.get("AIOPS_AGENTE", "unico"),
         "umbral_confianza": _env("AIOPS_CONFIDENCE_THRESHOLD", "0.8"),
-        "cortacircuito": {
-            "max": _env("AIOPS_BREAKER_MAX", "3"),
-            "ventana_s": _env("AIOPS_BREAKER_WINDOW_S", "3600"),
-        },
+        # lo que el experimento fija en cada corrida (ver experimento.AISLAMIENTO)
+        "aislamiento_entre_corridas": dict(AISLAMIENTO),
         "prompt_sha256": _sha256(RAIZ / "agents" / "aiops" / "prompt.md"),
         "runbooks_sha256": _sha256(*(RAIZ / "agents" / "aiops" / "runbooks").glob("RB-*.md")),
     }

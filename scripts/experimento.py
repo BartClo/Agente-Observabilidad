@@ -195,6 +195,15 @@ def _k8s_sano() -> bool:
     return _sh(["kubectl", "get", "--raw", "/readyz"], timeout=40, reintentos=3).returncode == 0
 
 
+# Aislamiento entre corridas: cada una inyecta una falla en el MISMO servicio, asi que sin
+# esto una corrida contamina a la siguiente. (1) El cortacircuito (que existe para frenar la
+# recurrencia real) contaria las inyecciones del experimento como recurrencia y escalaria
+# artificialmente. (2) Los logs FATAL de la corrida anterior le harian ver al agente
+# "reinicios que vuelven a caer". Se desactiva el primero y se acota el segundo a 60 s antes
+# de la alerta. Ambos se declaran en la tesis y quedan en resultados/congelado.json.
+AISLAMIENTO = {"AIOPS_BREAKER_MAX": "0", "AIOPS_LOGS_VENTANA_S": "60"}
+
+
 def _env_ciclo(nivel: int, puerto: str) -> list[str]:
     env = {
         "AIOPS_BACKEND": "prometheus",
@@ -218,6 +227,7 @@ def _env_ciclo(nivel: int, puerto: str) -> list[str]:
         "AIOPS_PERSISTENCIA": "postgres",
         "PYTHONUNBUFFERED": "1",
         "AIOPS_AGENTE": os.environ.get("AIOPS_AGENTE", "unico"),
+        **AISLAMIENTO,
     }
     return [a for k, v in env.items() for a in ("-e", f"{k}={v}")]
 

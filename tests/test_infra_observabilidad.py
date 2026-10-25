@@ -3,6 +3,7 @@ valide antes de interpolarlo en PromQL/LogQL."""
 
 from __future__ import annotations
 
+import time
 from typing import Any
 
 import pytest
@@ -188,3 +189,13 @@ def test_logs() -> None:
     )
     assert obs.logs("checkout", 2) == ["a", "b"]
     assert PrometheusLoki("http://p").logs("checkout", 5) == []
+
+
+def test_logs_desde_acota_la_ventana_de_la_consulta() -> None:
+    """Sin `desde` se mira la ultima hora; con `desde` (epoch s) solo lo posterior."""
+    obs = Falso({"/loki/": {"data": {"result": []}}})
+    obs.logs("checkout", 5, desde=1000.0)
+    assert "start=1000000000000" in obs.urls[-1]
+    obs.logs("checkout", 5)
+    inicio_ns = int(obs.urls[-1].split("start=")[1].split("&")[0])
+    assert abs(inicio_ns / 1e9 - (time.time() - 3600)) < 5

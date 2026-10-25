@@ -54,6 +54,7 @@ class Ciclo:
         verificacion_intervalo_s: float = 5.0,
         dormir: Callable[[float], None] = time.sleep,
         confirmacion_ventana_s: float = 0.0,
+        logs_ventana_s: float = 0.0,
     ) -> None:
         self._obs = observabilidad
         self._backend = backend
@@ -67,6 +68,10 @@ class Ciclo:
         self._dormir = dormir
         # Fase 6: confirmar reintenta ante "sin datos" hasta esta ventana (0 = una lectura).
         self._ventana_confirmacion = confirmacion_ventana_s
+        # Logs acotados a [disparada_en - ventana, ahora]. 0 = como siempre (cada adaptador usa
+        # su ventana). El experimento lo usa para que cada corrida vea los logs de SU falla y
+        # no los de las corridas anteriores sobre el mismo servicio.
+        self._logs_ventana = logs_ventana_s
         # Default: en memoria, se pierde al reiniciar (igual que antes de la Fase 1).
         # infra.incidentes_postgres.RepositorioIncidentesPostgres sobrevive reinicios.
         self._repo = repositorio if repositorio is not None else RepositorioIncidentesMemoria()
@@ -103,9 +108,12 @@ class Ciclo:
 
     def logs(self, incidente_id: str, lineas: int) -> list[str]:
         inc = self.incidente(incidente_id)
+        desde = None
+        if self._logs_ventana > 0 and inc.alerta.disparada_en is not None:
+            desde = inc.alerta.disparada_en - self._logs_ventana
         salida = [
             sanear_linea(linea)
-            for linea in self._obs.logs(inc.alerta.servicio, max(1, min(lineas, 200)))
+            for linea in self._obs.logs(inc.alerta.servicio, max(1, min(lineas, 200)), desde)
         ]
         self.auditoria.registrar(incidente_id, "consulta_logs", lineas=len(salida))
         return salida

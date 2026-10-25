@@ -375,3 +375,28 @@ laboratorio permite remediar y se declara.
 **Límite.** El consumidor es una **simulación**: no procesa mensajes. Lo real es la acción
 (rollout restart) y la verificación (la métrica vuelve a 1). `disco_lleno` sigue sin ser
 remediable.
+
+## D17. Aislamiento entre corridas del experimento
+
+**Problema (hallado en vivo, 2026-10-25).** Cada corrida inyecta una falla en el **mismo
+servicio**, así que una corrida contamina a la siguiente por dos vías: (1) el cortacircuito
+—que existe para frenar la recurrencia real— cuenta las inyecciones del experimento como
+recurrencia: tres corridas seguidas sobre `checkout` y la cuarta escalaba por "3 acciones en
+la última hora"; (2) los logs `FATAL` de la corrida anterior siguen en la consulta de la
+última hora y el agente veía "reinicios que vuelven a caer", que el runbook manda escalar.
+Ambas habrían bajado la TRA sin que fuera una decisión del agente.
+
+**Decisión.**
+- `ObservabilidadPort.logs(servicio, lineas, desde)` y `Ciclo(logs_ventana_s)`: con ventana,
+  los logs se piden desde `disparada_en - ventana`. Por defecto 0 = como siempre.
+- El experimento fija `AIOPS_BREAKER_MAX=0` y `AIOPS_LOGS_VENTANA_S=60`
+  (`experimento.AISLAMIENTO`), y `resultados/congelado.json` los registra.
+- El cortacircuito sigue probado por separado: tests de dominio y, en vivo, escaló como
+  "problema recurrente" en las tres corridas de la prueba de inyección.
+
+**Descartado.** Limpiar Loki entre corridas (requiere configurar borrado) y espaciar las
+corridas (la ventana de una hora las seguiría mezclando).
+
+**Límite.** Con 60 s el agente ve menos contexto histórico que un operador en producción;
+se declara como amenaza a la validez. La ventana debe cubrir el retraso entre la falla y la
+alerta: ~10 s por la vía directa y ~30 s por Grafana.
