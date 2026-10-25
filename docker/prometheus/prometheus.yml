@@ -36,6 +36,7 @@ scrape_configs:
   # cola_detenida: consumidor simulado en k3d (k8s-lab/workload-queue-consumer.yaml),
   # NodePort 30082. Publica rabbitmq_queue_consumers{queue="worker"} como lo haria el plugin.
   - job_name: queue-consumer
+    fallback_scrape_protocol: PrometheusText0.0.4  # busybox httpd no envia Content-Type
     static_configs:
       - targets: ["host.docker.internal:30082"]
         labels: {service: worker, env: dev}
