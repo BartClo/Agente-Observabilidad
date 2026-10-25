@@ -823,3 +823,54 @@ def test_reconciliar_respeta_lo_reciente_lo_terminado_y_la_aprobacion_pendiente(
     esperando = preparar(c2, alerta2)  # diagnosticado, elegible, nadie aprobo
     assert c2.reconciliar(max_edad_s=1) == []
     assert c2.incidente(esperando).estado is Estado.DIAGNOSTICADO
+
+
+# --- cortacircuito entre incidentes ---------------------------------------------------
+
+
+def _remediar_y_cerrar(ciclo: Ciclo, alerta_id: str) -> str:
+    inc_id = preparar(ciclo, alerta_id)
+    assert ciclo.ejecutar_remediacion(inc_id, aprobada=False).ejecutada
+    assert ciclo.verificar(inc_id)[0]
+    ciclo.cerrar(inc_id)
+    return inc_id
+
+
+def test_cortacircuito_escala_el_problema_recurrente_entre_incidentes() -> None:
+    ciclo, env, alerta_id = armar(max_acciones_servicio=2)
+    for _ in range(2):
+        _remediar_y_cerrar(ciclo, alerta_id)
+        alerta_id = env.inyectar_fallo("checkout", "servicio_detenido").id  # vuelve a fallar
+    inc3 = preparar(ciclo, alerta_id)
+    res = ciclo.ejecutar_remediacion(inc3, aprobada=False)
+    assert not res.ejecutada and "cortacircuito" in res.mensaje
+    assert env.acciones_ejecutadas == [("restart_service", "checkout")] * 2
+    assert not ciclo.incidente(inc3).acciones  # nunca toco el servicio por tercera vez
+
+
+def test_cortacircuito_olvida_lo_que_esta_fuera_de_la_ventana() -> None:
+    ciclo, env, alerta_id = armar(max_acciones_servicio=1, ventana_cortacircuito_s=1.0)
+    _remediar_y_cerrar(ciclo, alerta_id)
+    alerta_id = env.inyectar_fallo("checkout", "servicio_detenido").id
+    # el Reloj de los tests avanza 10 s por consulta: la accion anterior ya esta fuera
+    inc2 = preparar(ciclo, alerta_id)
+    assert ciclo.ejecutar_remediacion(inc2, aprobada=False).ejecutada
+
+
+def test_cortacircuito_es_por_servicio_y_se_puede_desactivar() -> None:
+    ciclo, env, alerta_id = armar(max_acciones_servicio=1)
+    _remediar_y_cerrar(ciclo, alerta_id)
+    otro = env.inyectar_fallo("billing", "disco_lleno").id  # otro servicio: no cuenta
+    assert ciclo.ejecutar_remediacion(preparar(ciclo, otro), aprobada=False).ejecutada
+
+    ciclo2, env2, a1 = armar(max_acciones_servicio=0)  # 0 = desactivado
+    for _ in range(4):
+        _remediar_y_cerrar(ciclo2, a1)
+        a1 = env2.inyectar_fallo("checkout", "servicio_detenido").id
+
+
+def test_politica_lee_el_cortacircuito_del_entorno() -> None:
+    p = politica_desde_entorno({"AIOPS_BREAKER_MAX": "5", "AIOPS_BREAKER_WINDOW_S": "120"})
+    assert (p.max_acciones_servicio, p.ventana_cortacircuito_s) == (5, 120.0)
+    d = politica_desde_entorno({})
+    assert (d.max_acciones_servicio, d.ventana_cortacircuito_s) == (3, 3600.0)

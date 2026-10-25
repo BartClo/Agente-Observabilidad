@@ -37,6 +37,10 @@ class Politica:
     servicios_permitidos: frozenset[str] | None = None  # None = cualquiera del entorno
     umbral_confianza: float = 0.8
     max_reintentos: int = 2
+    # Cortacircuito entre incidentes: tope de acciones sobre un mismo servicio dentro de la
+    # ventana, sumando TODOS los incidentes (max_reintentos solo mira el actual). 0 = apagado.
+    max_acciones_servicio: int = 3
+    ventana_cortacircuito_s: float = 3600.0
     kill_switch: Callable[[], bool] = field(default=lambda: False)
 
     def evaluar(
@@ -112,5 +116,7 @@ def politica_desde_entorno(env: Mapping[str, str] | None = None) -> Politica:
         ),
         umbral_confianza=float(env.get("AIOPS_CONFIDENCE_THRESHOLD", "0.8")),
         max_reintentos=int(env.get("AIOPS_MAX_RETRIES", "2")),
+        max_acciones_servicio=int(env.get("AIOPS_BREAKER_MAX", "3")),
+        ventana_cortacircuito_s=float(env.get("AIOPS_BREAKER_WINDOW_S", "3600")),
         kill_switch=kill_switch,
     )

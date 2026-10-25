@@ -55,6 +55,9 @@ class AccionEjecutada:
     resultado: str
     ok: bool
     es_rollback: bool = False
+    # Instante de la accion (reloj del ciclo): lo usa el cortacircuito entre incidentes.
+    # None en las filas guardadas antes de este campo.
+    ts: float | None = None
 
 
 @dataclass(frozen=True)

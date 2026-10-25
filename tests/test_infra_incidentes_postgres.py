@@ -94,3 +94,16 @@ def test_lee_incidentes_guardados_antes_de_la_fase_6(repo: RepositorioIncidentes
         )
     leido = repo.obtener(inc.id)
     assert leido is not None and (leido.tokens_entrada, leido.tokens_salida) == (0, 0)
+
+
+def test_filas_viejas_sin_ts_en_las_acciones_se_leen_con_none() -> None:
+    from domain.aiops_core.modelos import AccionEjecutada, Alerta, Incidente, Severidad
+    from infra.incidentes_postgres import _a_dict, _desde_dict
+
+    alerta = Alerta("a1", "ServiceDown", "checkout", "dev", Severidad.ALTA, "r")
+    inc = Incidente(id="INC-ts", alerta=alerta, abierto_en=1.0)
+    inc.acciones.append(AccionEjecutada("restart_service", "checkout", "ok", True, False, 42.0))
+    datos = _a_dict(inc)
+    assert _desde_dict(datos).acciones[0].ts == 42.0
+    del datos["acciones"][0]["ts"]  # fila guardada antes de existir el campo
+    assert _desde_dict(datos).acciones[0].ts is None

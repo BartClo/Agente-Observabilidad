@@ -255,3 +255,21 @@ Tarea 9 del plan (6 corridas sin que ninguna termine sin cerrar ni escalar).
 
 **Límite.** Se atribuye la parada al pedido por hipótesis; la corrida en vivo la confirma
 o la descarta.
+
+## D10. Cortacircuito entre incidentes
+
+**Problema.** `max_reintentos` es por incidente. Una alerta que reaparece tras cada
+reinicio crea otro incidente y otro reinicio, sin fin: el patrón "la automatización como
+origen del incidente" (Tabla 3 de la tesis; AWS us-east-1) y un generador de acciones
+incorrectas para H3. Google SRE pide límites de tasa y cortacircuitos propios del agente;
+Azure SRE Agent tiene un período de espera por alerta.
+
+**Decisión.** Antes de evaluar la política, el ciclo cuenta las acciones de remediación
+sobre el mismo servicio en la ventana (`AIOPS_BREAKER_WINDOW_S`, 3600 s) sumando todos
+los incidentes. Si llegan a `AIOPS_BREAKER_MAX` (3) deniega y el agente escala como
+recurrente. Los rollbacks no cuentan. 0 apaga el cortacircuito.
+
+**Descartado.** Degradar a nivel 2 en vez de denegar: más piezas sin que cambie lo que
+medimos.
+
+**Límite.** Recorre todos los incidentes en cada ejecución (`ponytail:` en el código).

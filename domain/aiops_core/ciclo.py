@@ -420,6 +420,19 @@ class Ciclo:
             tocados.append(inc.id)
         return tocados
 
+    def _acciones_recientes(self, servicio: str) -> int:
+        """Acciones de remediacion sobre `servicio` dentro de la ventana del cortacircuito,
+        de TODOS los incidentes: el tope de reintentos solo mira el incidente actual.
+        ponytail: recorre todos los incidentes en cada ejecucion; si crecen a miles, un
+        indice por servicio."""
+        desde = self._reloj() - self.politica.ventana_cortacircuito_s
+        return sum(
+            1
+            for i in self.incidentes()
+            for a in i.acciones
+            if a.servicio == servicio and not a.es_rollback and a.ts is not None and a.ts >= desde
+        )
+
     def espera_aprobacion(self, inc: Incidente) -> bool:
         """Nivel 2: diagnosticado, elegible y sin decision humana todavia. Es una espera
         legitima, no un incidente abandonado."""
@@ -444,6 +457,15 @@ class Ciclo:
                 "aprobada=True sin una aprobacion registrada en el dominio: "
                 "llamar Ciclo.aprobar(incidente_id, usuario) antes de ejecutar"
             )
+        if not es_rollback and self.politica.max_acciones_servicio > 0:
+            recientes = self._acciones_recientes(inc.alerta.servicio)
+            if recientes >= self.politica.max_acciones_servicio:
+                return self._decidir_sin_ejecutar(
+                    inc,
+                    f"cortacircuito: {recientes} acciones sobre {inc.alerta.servicio!r} en los "
+                    f"ultimos {self.politica.ventana_cortacircuito_s:.0f}s (maximo "
+                    f"{self.politica.max_acciones_servicio}): problema recurrente, escalar",
+                )
         decision = self.politica.evaluar(
             inc, self._categoria(inc), accion, es_rollback=es_rollback, aprobada=aprobada
         )
@@ -469,7 +491,7 @@ class Ciclo:
         except (AccionNoPermitida, RuntimeError, OSError, TimeoutError) as exc:
             resultado, ok = f"{type(exc).__name__}: {exc}", False
         inc.acciones.append(
-            AccionEjecutada(accion, inc.alerta.servicio, resultado, ok, es_rollback)
+            AccionEjecutada(accion, inc.alerta.servicio, resultado, ok, es_rollback, self._reloj())
         )
         if aprobada:
             inc.intervencion_humana = True  # una aprobacion humana no cuenta como autonoma

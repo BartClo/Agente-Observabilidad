@@ -6,6 +6,7 @@ llamadas a tools. `reset()` existe para tests y evals.
 
 from __future__ import annotations
 
+import dataclasses
 import os
 from pathlib import Path
 
@@ -13,7 +14,7 @@ from domain.aiops_core.acciones import BackendAcciones, BackendDeshabilitado
 from domain.aiops_core.auditoria import Auditoria, Evento
 from domain.aiops_core.ciclo import Ciclo
 from domain.aiops_core.observabilidad import ObservabilidadPort
-from domain.aiops_core.politicas import Politica, politica_desde_entorno
+from domain.aiops_core.politicas import politica_desde_entorno
 from domain.aiops_core.repositorio import RepositorioIncidentes
 from domain.aiops_core.simulador import EntornoSimulado
 
@@ -80,14 +81,7 @@ def armar(*, persistencia: str | None = None) -> Ciclo:
         from agents.aiops import notificaciones
 
         on_evento = notificaciones.componer(crear_sink_postgres(), notificaciones.crear_sink())
-        politica = Politica(
-            nivel=politica.nivel,
-            entornos_permitidos=politica.entornos_permitidos,
-            servicios_permitidos=politica.servicios_permitidos,
-            umbral_confianza=politica.umbral_confianza,
-            max_reintentos=politica.max_reintentos,
-            kill_switch=kill_switch_postgres(),
-        )
+        politica = dataclasses.replace(politica, kill_switch=kill_switch_postgres())
     auditoria = Auditoria(Path(ruta) if ruta else None, on_evento=on_evento)
     return Ciclo(
         observabilidad,
