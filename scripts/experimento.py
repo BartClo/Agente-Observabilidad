@@ -27,8 +27,11 @@ import subprocess
 import time
 import urllib.parse
 import urllib.request
+from collections.abc import Iterator, Sequence
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 RAIZ = Path(__file__).resolve().parent.parent
 PROMETHEUS = os.environ.get("EXP_PROMETHEUS", "http://localhost:9090")
@@ -93,6 +96,7 @@ COLUMNAS = [
     "fase",
     "nivel",
     "agente",
+    "via",
     "categoria_esperada",
     "alertname",
     "servicio",
@@ -106,6 +110,7 @@ COLUMNAS = [
     "acciones_nombres",
     "disparada_en",
     "inicio_atencion",
+    "deteccion_s",
     "cerrado_en",
     "mttr_s",
     "tokens_entrada",
@@ -214,8 +219,97 @@ def _env_ciclo(nivel: int, puerto: str) -> list[str]:
     return [a for k, v in env.items() for a in ("-e", f"{k}={v}")]
 
 
+TERMINALES = ("resuelto", "escalado", "descartado")
+
+
+def _listar_incidentes() -> list[dict[str, object]]:
+    req = urllib.request.Request(  # noqa: S310
+        f"{API}/incidentes", headers={"Authorization": f"Bearer {_token_api()}"}
+    )
+    with urllib.request.urlopen(req, timeout=30) as r:  # noqa: S310
+        return [dict(i) for i in json.load(r)]
+
+
+def buscar_incidente_nuevo(
+    lista: Sequence[dict[str, object]], esc: Escenario, desde: float
+) -> dict[str, object] | None:
+    """El incidente que abrio el worker para la alerta de este escenario despues de `desde`
+    (el primero, si hubo mas de uno)."""
+    candidatos = [
+        i
+        for i in lista
+        if i.get("alerta") == esc.alertname
+        and i.get("servicio") == esc.servicio
+        and float(str(i.get("abierto_en") or 0)) >= desde
+    ]
+    return min(candidatos, key=lambda i: float(str(i["abierto_en"]))) if candidatos else None
+
+
+def esperar_camino_real(
+    esc: Escenario,
+    disparo: float,
+    espera_apertura_s: float = 120.0,
+    espera_cierre_s: float = 900.0,
+) -> tuple[str | None, str]:
+    """Camino real: Grafana dispara la alerta, el webhook encola y el worker atiende. Espera
+    a que se abra el incidente y a que llegue a un estado terminal. Devuelve (id, "") o un
+    motivo: `infra:` si nadie abrio el incidente (no es una decision del agente y el analisis
+    lo excluye), `agente:` si se abrio pero no termino (si cuenta)."""
+    limite = time.time() + espera_apertura_s
+    incidente_id: str | None = None
+    while time.time() < limite:
+        encontrado = buscar_incidente_nuevo(_listar_incidentes(), esc, disparo - 2)
+        if encontrado is not None:
+            incidente_id = str(encontrado["id"])
+            break
+        time.sleep(3)
+    if incidente_id is None:
+        return None, (
+            f"infra: en {espera_apertura_s:.0f} s Grafana no disparo la alerta o el worker no "
+            "abrio el incidente"
+        )
+    limite = time.time() + espera_cierre_s
+    while time.time() < limite:
+        if _incidente(incidente_id)["estado"] in TERMINALES:
+            return incidente_id, ""
+        time.sleep(5)
+    return incidente_id, (
+        f"agente: el incidente no llego a un estado terminal en {espera_cierre_s:.0f} s"
+    )
+
+
+@contextmanager
+def worker_de_laboratorio(nivel: int, puerto: str) -> Iterator[None]:
+    """Camino real: atiende el worker, no `scripts.lab_ciclo`. El worker del compose no trae
+    el entorno del laboratorio (Prometheus, Kubernetes, nivel de autonomia), asi que se baja
+    ese y se levanta uno con el MISMO entorno que usa el modo directo. Al terminar se
+    restaura el worker normal."""
+    nombre = "aiops-worker-lab"
+    _sh(["docker", "compose", "stop", "worker"])
+    _sh(["docker", "rm", "-f", nombre])
+    r = _sh(
+        ["docker", "compose", "run", "-d", "--name", nombre, *_env_ciclo(nivel, puerto), "worker"]
+    )
+    if r.returncode != 0:
+        _sh(["docker", "compose", "start", "worker"])
+        raise SystemExit(
+            f"No se pudo levantar el worker del laboratorio: {r.stderr.strip()[-300:]}"
+        )
+    try:
+        yield
+    finally:
+        _sh(["docker", "rm", "-f", nombre])
+        _sh(["docker", "compose", "start", "worker"])
+
+
 def correr(
-    cat: str, n: int, modo: str, nivel: int, puerto: str, fase: str = "ajuste"
+    cat: str,
+    n: int,
+    modo: str,
+    nivel: int,
+    puerto: str,
+    fase: str = "ajuste",
+    via: str = "directo",
 ) -> dict[str, object]:
     esc = ESCENARIOS[cat]
     fila: dict[str, object] = {c: "" for c in COLUMNAS}
@@ -226,6 +320,7 @@ def correr(
         fase=fase,
         nivel=nivel,
         agente=os.environ.get("AIOPS_AGENTE", "unico"),
+        via=via,
         categoria_esperada=cat,
         alertname=esc.alertname,
         servicio=esc.servicio,
@@ -252,35 +347,44 @@ def correr(
     disparo = time.time()
     fila["disparada_en"] = f"{disparo:.3f}"
     # (4) atender
-    fila["inicio_atencion"] = f"{time.time():.3f}"
-    r = _sh(
-        [
-            "docker",
-            "compose",
-            "exec",
-            "-T",
-            *_env_ciclo(nivel, puerto),
-            "api",
-            "uv",
-            "run",
-            "python",
-            "-m",
-            "scripts.lab_ciclo",
-            esc.alertname,
-            esc.servicio,
-            "--modo",
-            modo,
-            "--disparada-en",
-            f"{disparo:.3f}",
-        ],
-        timeout=1200,
-    )
-    m = re.search(r"^RESULTADO (\{.*\})$", r.stdout, re.MULTILINE)
-    if not m:
-        return fallo(f"el ciclo no termino: {(r.stderr or r.stdout).strip()[-300:]}")
-    resultado = json.loads(m.group(1))
-    if resultado.get("error"):
-        fila["error"] = f"agente: {resultado['error']}"
+    if via == "webhook":
+        # camino real: Grafana dispara la alerta, el webhook encola y el worker atiende
+        incidente_id, motivo = esperar_camino_real(esc, disparo)
+        if incidente_id is None:
+            return fallo(motivo)
+        if motivo:
+            fila["error"] = motivo
+        resultado: dict[str, Any] = {"incidente": incidente_id}
+    else:
+        fila["inicio_atencion"] = f"{time.time():.3f}"
+        r = _sh(
+            [
+                "docker",
+                "compose",
+                "exec",
+                "-T",
+                *_env_ciclo(nivel, puerto),
+                "api",
+                "uv",
+                "run",
+                "python",
+                "-m",
+                "scripts.lab_ciclo",
+                esc.alertname,
+                esc.servicio,
+                "--modo",
+                modo,
+                "--disparada-en",
+                f"{disparo:.3f}",
+            ],
+            timeout=1200,
+        )
+        m = re.search(r"^RESULTADO (\{.*\})$", r.stdout, re.MULTILINE)
+        if not m:
+            return fallo(f"el ciclo no termino: {(r.stderr or r.stdout).strip()[-300:]}")
+        resultado = json.loads(m.group(1))
+        if resultado.get("error"):
+            fila["error"] = f"agente: {resultado['error']}"
     # (5) leer el resultado como un operador
     d = _incidente(resultado["incidente"])
     acciones = d.get("acciones") or []
@@ -304,6 +408,9 @@ def correr(
         modelo_llm=d.get("modelo_llm") or "",
         motivo_escalamiento=d.get("motivo_escalamiento") or "",
     )
+    if via == "webhook":
+        fila["inicio_atencion"] = f"{float(str(d['abierto_en'])):.3f}"
+        fila["deteccion_s"] = f"{float(str(d['abierto_en'])) - disparo:.1f}"
     if d.get("cerrado_en"):
         fila["mttr_s"] = f"{float(d['cerrado_en']) - disparo:.1f}"  # type: ignore[arg-type]
     print(
@@ -368,6 +475,13 @@ def main() -> int:
         help="escenario de seguridad: servicio_detenido con una linea de log hostil. Usar un "
         "CSV aparte (resultados/inyeccion-*.csv): no se mezcla con la TRA",
     )
+    p.add_argument(
+        "--via",
+        choices=("directo", "webhook"),
+        default="directo",
+        help="directo: invoca el ciclo (rapido, para ajustar). webhook: camino real, espera a "
+        "que Grafana dispare la alerta y al worker (mide la deteccion; solo --modo llm)",
+    )
     args = p.parse_args()
     if args.fase == "final":
         exigir_congelado()
@@ -379,6 +493,8 @@ def main() -> int:
         if cats != ["servicio_detenido"]:
             raise SystemExit("--inyeccion solo aplica a --categorias servicio_detenido")
         _ENV_SUB["INYECTAR_LOG"] = "1"
+    if args.via == "webhook" and args.modo != "llm":
+        raise SystemExit("--via webhook solo con --modo llm: el modo script invoca el ciclo")
     if _prom("up") is None:
         raise SystemExit(f"Prometheus no responde en {PROMETHEUS}: levantar el laboratorio")
     puerto = _puerto_k8s()
@@ -390,11 +506,18 @@ def main() -> int:
         w = csv.DictWriter(f, fieldnames=COLUMNAS)
         if nuevo:
             w.writeheader()
-        for n in range(1, args.repeticiones + 1):
-            for cat in cats:  # intercalado: una categoria lenta no concentra sus corridas
-                print(f"[{n}/{args.repeticiones}] {cat} (modo {args.modo}, nivel {args.nivel})")
-                w.writerow(correr(cat, n, args.modo, args.nivel, puerto, args.fase))
-                f.flush()  # una corrida cortada no pierde las anteriores
+        contexto = (
+            worker_de_laboratorio(args.nivel, puerto) if args.via == "webhook" else nullcontext()
+        )
+        with contexto:
+            for n in range(1, args.repeticiones + 1):
+                for cat in cats:  # intercalado: una categoria lenta no concentra sus corridas
+                    print(
+                        f"[{n}/{args.repeticiones}] {cat} "
+                        f"(modo {args.modo}, nivel {args.nivel}, via {args.via})"
+                    )
+                    w.writerow(correr(cat, n, args.modo, args.nivel, puerto, args.fase, args.via))
+                    f.flush()  # una corrida cortada no pierde las anteriores
     print(f"Listo: {salida}")
     return 0
 

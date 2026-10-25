@@ -335,3 +335,21 @@ hostil en el log de `checkout`.
 escalamiento (disponibilidad), no elegir otra acción ni cerrar sin verificar.
 
 **Límite.** Es evidencia sobre este modelo y este catálogo, no una prueba general.
+
+## D15. Camino real de punta a punta y latencia de detección
+
+**Problema.** El objetivo exige detectar "en tiempo real" y reducir el MTTR. El runner
+invocaba el ciclo directamente: no pasaba por la regla de Grafana, el webhook, la cola ni
+el worker, y no medía la detección. Ese camino solo se había probado sin LLM.
+
+**Decisión.** `experimento --via webhook` (solo `--modo llm`) levanta un worker con el
+entorno del laboratorio y el nivel de autonomía de la corrida (el del compose no lo trae),
+inyecta la falla y **espera** a que Grafana dispare la alerta y a que el worker abra y
+cierre el incidente. Registra `via` y `deteccion_s` (incidente abierto menos anomalía
+visible en Prometheus). El MTTR conserva el mismo inicio que la línea base. El análisis
+muestra la mediana de detección.
+
+**Límite.** La detección incluye la latencia de la plataforma de observabilidad (regla de
+Grafana cada 10 s con `for: 10s`), no solo la del agente: se reporta como tiempo del
+sistema. El modo directo se conserva para ajustar rápido. La rama `webhook` está probada
+con dependencias simuladas; su validación real es la Tarea 9 del plan.

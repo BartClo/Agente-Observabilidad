@@ -12,6 +12,7 @@ import argparse
 import csv
 import sys
 from collections.abc import Callable, Sequence
+from statistics import median
 
 from domain.aiops_core import evaluacion as ev
 
@@ -77,6 +78,18 @@ def filtrar_fase(filas: Sequence[dict[str, str]], fase: str) -> list[dict[str, s
     return [f for f in filas if f.get("fase", "ajuste") == fase]
 
 
+def resumen_deteccion(filas: Sequence[dict[str, str]]) -> str | None:
+    """Tiempo de deteccion (anomalia visible -> incidente abierto por el worker). Solo hay
+    dato en las corridas por el camino real (`--via webhook`)."""
+    valores = sorted(float(f["deteccion_s"]) for f in filas if f.get("deteccion_s"))
+    if not valores:
+        return None
+    return (
+        f"Detección (anomalía visible → incidente abierto): mediana {median(valores):.1f} s "
+        f"(mín {valores[0]:.1f}, máx {valores[-1]:.1f}, n = {len(valores)})"
+    )
+
+
 def main(argv: list[str]) -> int:
     p = argparse.ArgumentParser(description="Resume un experimento de la Fase 7.")
     p.add_argument("csv")
@@ -129,6 +142,9 @@ def main(argv: list[str]) -> int:
         )
     except ValueError:
         pass
+    deteccion = resumen_deteccion(filas)
+    if deteccion:
+        print(deteccion, "\n")
     print("## Hipótesis\n")
     print(tabla_hipotesis(ev.contrastar(corridas, base)))
     return 0
