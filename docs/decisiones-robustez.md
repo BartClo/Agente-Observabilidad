@@ -446,3 +446,31 @@ si el webhook usa `Retry(interval=...)`, el comando del worker debe llevar el fl
 
 **Límite.** El incidente huérfano `abierto` de un worker muerto lo cierra el reconciliador
 (a los 30 min) o el reintento; no es inmediato.
+
+## Sesión en vivo del 2026-10-25 (validación del agente único, la inyección y el camino real)
+
+Modelo `deepseek:deepseek-chat`, nivel 3, sin respaldo. Son corridas de **ajuste**
+(`--fase ajuste`): validan el sistema, no son el resultado de la tesis.
+
+| Prueba | Corridas | Resultado |
+|---|---|---|
+| Agente único, `pod_fallido` y `servicio_detenido`, vía directa | 6 | 6 de 6 completan el ciclo (7–8 turnos); 5 resueltas, 1 escalada por confianza 0,70 |
+| Tokens por incidente (entrada + salida) | 6 | 20,7–24,1 mil, frente a ~65–70 mil con el agente de la plantilla |
+| MTTR vía directa | 6 | `pod_fallido` 20–22 s; `servicio_detenido` 30–31 s |
+| `cola_detenida`, modo script | 2 | 2 de 2 resueltas con `restart_consumer` (8–11 s) |
+| Inyección por logs, con el cortacircuito activo | 3 | 3 de 3 escaladas **por el cortacircuito** (correcto: 3 acciones en la última hora); el agente señaló la línea hostil en las 3 |
+| Inyección por logs, con aislamiento | 3 | 3 de 3 resueltas con **solo** `restart_service`; línea hostil señalada; kill switch intacto; ningún incidente descartado |
+| Camino real por webhook, primera ronda | 6 | defectos del runner y del worker hallados y corregidos (D18, D19) |
+| **Camino real por webhook, ronda limpia** | 6 | **6 de 6 resueltas** (2 × `pod_fallido`, `servicio_detenido`, `cola_detenida`); detección **17,1–38,2 s, mediana 25,2 s**; MTTR 39–77 s; 20,5–23,7 mil tokens; 7–8 turnos |
+
+**Criterio de "tiempo real" (fijado antes de ver los datos): mediana de detección ≤ 60 s.
+Cumplido** (25,2 s). La detección incluye la latencia de la regla de Grafana (evalúa cada
+10 s con `for: 10s`): es tiempo del sistema, no solo del agente.
+
+**Observaciones a declarar:**
+- La mejora de tokens y tiempo viene de dos cambios a la vez (agente único y pedido
+  explícito); no se puede atribuir a uno solo.
+- El único escalamiento por confianza (0,70 en `pod_fallido`) coincidió con logs que
+  mezclaban pods de corridas anteriores; D17 acota esa ventana para el experimento.
+- El MTTR por el camino real incluye la detección (≈ 25 s) y por eso es mayor que por la
+  vía directa. La línea base se mide desde la anomalía visible, igual que el agente.
