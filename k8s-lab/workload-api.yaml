@@ -23,7 +23,24 @@ spec:
       containers:
         - name: api
           image: busybox:1.36
-          command: ["sh", "-c", "touch /tmp/ok && sleep 2147483647"]
+          # Logs (Loki, k8s-lab/promtail.yaml): como un servicio real, avisa cuando su
+          # chequeo de salud empieza a fallar -- la evidencia que pide RB-003. Solo
+          # loguea los CAMBIOS de estado (no una linea cada 2 s).
+          command:
+            - sh
+            - -c
+            - |
+              touch /tmp/ok
+              echo "INFO api: listo (chequeo de salud en /tmp/ok)"
+              estado=ok
+              while :; do
+                if [ -f /tmp/ok ]; then
+                  [ "$estado" = ok ] || { echo "INFO api: chequeo de salud recuperado"; estado=ok; }
+                else
+                  [ "$estado" = fallo ] || { echo "ERROR api: chequeo de salud fallando (falta /tmp/ok): el pod queda NotReady"; estado=fallo; }
+                fi
+                sleep 2
+              done
           readinessProbe:
             exec:
               command: ["cat", "/tmp/ok"]
