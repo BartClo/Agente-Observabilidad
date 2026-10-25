@@ -353,3 +353,25 @@ muestra la mediana de detección.
 Grafana cada 10 s con `for: 10s`), no solo la del agente: se reporta como tiempo del
 sistema. El modo directo se conserva para ajustar rápido. La rama `webhook` está probada
 con dependencias simuladas; su validación real es la Tarea 9 del plan.
+
+## D16. `cola_detenida` remediable en el laboratorio (consumidor simulado)
+
+**Problema.** De las 4 categorías elegibles solo 2 (`servicio_detenido`, `pod_fallido`)
+eran remediables en el laboratorio. Con un agente perfecto la TRA máxima era 50 %, y para
+llegar al 30 % de H1 hacía falta un 60 % de éxito en esas dos. Además `QueueStalled`
+estaba **siempre en alerta** (el RabbitMQ del compose no tiene consumidores) y la consulta
+del agente (`rabbitmq_queue_consumers{queue="worker"}`) no encontraba datos, así que ni
+confirmaba la anomalía.
+
+**Decisión.** Un Deployment `worker` en k3d (busybox + httpd, como `checkout`) publica
+`rabbitmq_queue_consumers{queue="worker"}`. La falla lo pone en 0 (consumidor
+desconectado) y `restart_consumer`, que ya era un `rollout restart`, lo reconecta. El
+broker real deja de llevar `service=worker` y la regla de Grafana mira solo la métrica del
+consumidor. Con 3 de 4 categorías remediables el umbral baja a un 40 % de éxito en ellas.
+
+**No se cambia la definición de TRA ni se saca nada del denominador:** se amplía lo que el
+laboratorio permite remediar y se declara.
+
+**Límite.** El consumidor es una **simulación**: no procesa mensajes. Lo real es la acción
+(rollout restart) y la verificación (la métrica vuelve a 1). `disco_lleno` sigue sin ser
+remediable.

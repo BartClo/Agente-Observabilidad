@@ -79,7 +79,7 @@ groups:
             relativeTimeRange: { from: 60, to: 0 }
             datasourceUid: prometheus-lab
             model:
-              expr: rabbitmq_queue_consumers
+              expr: rabbitmq_queue_consumers{queue="worker"}
               instant: true
               refId: consulta
           - refId: umbral

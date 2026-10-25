@@ -30,12 +30,16 @@ permite este laboratorio en una máquina compartida.
 | `servicio_detenido` | `restart_service` (rollout restart en k3d) | Sí | Resuelto |
 | `pod_fallido` | `recreate_pod` (k3d) | Sí | Resuelto |
 | `disco_lleno` | `compress_old_logs` | No: no es una operación de Kubernetes | Elegible pero **escala**: baja la TRA |
-| `cola_detenida` | `restart_consumer` | No: no hay consumidor en k3d ni métricas por cola | Elegible pero **escala por falta de datos**: baja la TRA |
+| `cola_detenida` | `restart_consumer` (rollout restart del consumidor **simulado** en k3d) | Sí (simulado) | Resuelto |
 | `certificado_por_vencer` | ninguna | — | No elegible: escala por diseño |
 
-`disco_lleno` y `cola_detenida` cuentan como elegibles (lo son según el catálogo) y el
-agente no las puede resolver en este laboratorio. Hay que **reportarlo así**, no
-sacarlas del denominador. Si se las saca, hay que declararlo como limitación.
+`disco_lleno` cuenta como elegible (lo es según el catálogo) y el agente no la puede
+resolver en este laboratorio. Hay que **reportarlo así**, no sacarla del denominador. Si
+se la saca, hay que declararlo como limitación.
+
+Con 3 de las 4 categorías elegibles remediables, la TRA máxima con un agente perfecto es
+75 % y para llegar al 30 % hace falta al menos un 40 % de éxito en ellas (con solo 2
+remediables eran 50 % y 60 %).
 
 ## 1. Preparar el laboratorio
 
@@ -124,7 +128,10 @@ Imprime tablas Markdown por categoría y el contraste de H1–H3. Si el CSV es d
 
 - Laboratorio en una sola máquina compartida: la carga externa afecta los tiempos
   (MTTR) y provoca fallas de infraestructura (se registran aparte).
-- `disco_lleno` y `cola_detenida` no son remediables en este laboratorio (ver arriba).
+- `disco_lleno` no es remediable en este laboratorio (ver arriba).
+- El consumidor de `cola_detenida` es una **simulación** (busybox + httpd que publica la métrica
+  de RabbitMQ), no un consumidor real de mensajes: la acción `restart_consumer` es real
+  (rollout restart en Kubernetes), el consumidor no.
 - Nivel 2 no se evalúa con el LLM: la pausa de aprobación se resuelve por el estado en
   Postgres y no reanuda el grafo de LangGraph (checkpointer sin cablear).
 - Las fallas son inyectadas y conocidas; no hay ruido de producción, alertas espurias ni

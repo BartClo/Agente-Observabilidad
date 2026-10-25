@@ -73,12 +73,15 @@ ESCENARIOS: dict[str, Escenario] = {
         ' / node_filesystem_size_bytes{service="billing",mountpoint="/data"}) > 85',
         "recuperar_disco.sh",
     ),
-    # Sin consumidor real ni metricas por cola: el agente escala por falta de datos.
+    # Consumidor SIMULADO en k3d (k8s-lab/workload-queue-consumer.yaml): restart_consumer
+    # lo arregla de verdad, como a checkout. No es un RabbitMQ real: se declara en la tesis.
     "cola_detenida": Escenario(
         "QueueStalled",
         "worker",
         "cola_detenida.sh",
-        "max(rabbitmq_queue_consumers) < 1",
+        'max(rabbitmq_queue_consumers{queue="worker"}) < 1',
+        "recuperar_cola.sh",
+        usa_k8s=True,
     ),
     # Sin accion autorizada: escala por diseno. La falla (cert de 3 dias) ya esta presente.
     "certificado_por_vencer": Escenario(
