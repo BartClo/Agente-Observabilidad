@@ -3,6 +3,7 @@ del ciclo L1 y nada mas."""
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 import pytest
@@ -66,3 +67,27 @@ def test_sin_interrupt_on_la_aprobacion_la_sigue_exigiendo_el_dominio(
     inc = ciclo.abrir(ciclo.alertas_activas()[0].split(" | ")[0])
     assert tools.ejecutar_remediacion_con_aprobacion(inc.id).startswith("ERROR")
     runtime.reset()
+
+
+def test_el_pedido_dice_que_el_incidente_ya_esta_abierto() -> None:
+    from agents.aiops.worker_jobs import pedido_de
+    from domain.aiops_core.modelos import Alerta, Severidad
+
+    alerta = Alerta("a1", "PodFailed", "api", "dev", Severidad.ALTA, "r")
+    pedido = pedido_de("INC-1", alerta)
+    assert "confirmar_anomalia" in pedido and "INC-1" in pedido
+    assert "no uses listar_alertas_activas ni abrir_incidente" in pedido
+    # los tests del worker extraen el id con esta expresion: no romperla
+    coincidencia = re.search(r"incidente (\S+) \(", pedido)
+    assert coincidencia is not None and coincidencia.group(1) == "INC-1"
+
+
+def test_el_interruptor_elige_el_agente_de_la_plantilla(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("app.main.build_agent", lambda modelo=None: ("plantilla", modelo))
+    monkeypatch.setenv("AIOPS_AGENTE", "deepagents")
+    assert agente.construir("M") == ("plantilla", "M")
+    monkeypatch.setenv("AIOPS_AGENTE", "unico")
+    unico = agente.construir(ModeloConTools(messages=iter([])))
+    assert unico.get_graph() is not None  # un grafo de LangChain, no la tupla de la plantilla

@@ -238,3 +238,20 @@ LangChain cuenta las llamadas al LLM y a tools de la corrida completa (los callb
 `config` los heredan los runs hijos) y las suma en el incidente, incluso si hubo respaldo.
 Las "tools" incluyen las internas del framework cuando existan, y se declara así en la
 tesis. Columnas `turnos_llm` y `llamadas_tools` en el CSV del experimento.
+
+## D9. Pedido explícito al agente único y brazo de comparación
+
+**Problema.** En la primera corrida real con el agente único (2026-10-21) paró a los 3
+turnos con el incidente en `abierto`: el pedido solo daba el id del incidente y el prompt
+arranca por buscar/abrir la alerta. Sus 6.675 tokens no eran un ahorro: no trabajó.
+
+**Decisión.** El pedido dice que el incidente ya está abierto y por dónde seguir
+(`pedido_de`); el prompt admite saltar los pasos 1 y 2. Además `AIOPS_AGENTE=deepagents`
+selecciona el agente de la plantilla como **brazo de comparación**, y el CSV registra qué
+agente corrió cada fila.
+
+**Verificación.** Tests del pedido y del interruptor; la validación en vivo es la
+Tarea 9 del plan (6 corridas sin que ninguna termine sin cerrar ni escalar).
+
+**Límite.** Se atribuye la parada al pedido por hipótesis; la corrida en vivo la confirma
+o la descarta.

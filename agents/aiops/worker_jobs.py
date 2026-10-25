@@ -103,6 +103,19 @@ def reconciliar_colgados(ciclo: Ciclo) -> list[str]:
         return []
 
 
+def pedido_de(incidente_id: str, alerta: Alerta) -> str:
+    """Lo primero que lee el agente. El worker ya abrio el incidente (`abrir_desde_alerta`):
+    el agente no debe buscar la alerta ni abrirlo de nuevo, sino seguir desde la
+    confirmacion. El pedido anterior solo daba el id mientras el prompt arranca por abrir;
+    en la primera corrida real del agente unico paro a los 3 turnos."""
+    return (
+        f"Atiende el incidente {incidente_id} (alerta {alerta.nombre} en {alerta.servicio}, "
+        f"entorno {alerta.entorno}) hasta cerrarlo o escalarlo. El incidente YA esta abierto: "
+        "no uses listar_alertas_activas ni abrir_incidente; empieza por confirmar_anomalia "
+        f"con incidente_id={incidente_id}."
+    )
+
+
 def atender_con_agente(ciclo: Ciclo, incidente_id: str, alerta: Alerta) -> None:
     """El LLM atiende un incidente ya abierto, hasta cerrarlo o escalarlo. Lo usan el
     worker (alertas reales) y scripts/lab_ciclo.py --modo llm (el experimento de la
@@ -117,10 +130,7 @@ def atender_con_agente(ciclo: Ciclo, incidente_id: str, alerta: Alerta) -> None:
     from agents.aiops.agente import construir, modelo_por_defecto
     from app.main import modelo_de_la_ui, respaldo_de_la_ui
 
-    pedido = (
-        f"Atiende el incidente {incidente_id} (alerta {alerta.nombre} en {alerta.servicio}, "
-        f"entorno {alerta.entorno}) hasta cerrarlo o escalarlo."
-    )
+    pedido = pedido_de(incidente_id, alerta)
     # El callback suma el uso de TODAS las llamadas al LLM de la corrida, incluidas las
     # del subagente aiops dentro de su tool call: contar solo los mensajes finales del
     # orquestador subestimaria el costo (Fase 6).

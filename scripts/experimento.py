@@ -91,6 +91,7 @@ COLUMNAS = [
     "fecha",
     "modo",
     "nivel",
+    "agente",
     "categoria_esperada",
     "alertname",
     "servicio",
@@ -207,6 +208,7 @@ def _env_ciclo(nivel: int, puerto: str) -> list[str]:
         "AIOPS_DISK_MOUNTPOINT": "/data",
         "AIOPS_PERSISTENCIA": "postgres",
         "PYTHONUNBUFFERED": "1",
+        "AIOPS_AGENTE": os.environ.get("AIOPS_AGENTE", "unico"),
     }
     return [a for k, v in env.items() for a in ("-e", f"{k}={v}")]
 
@@ -219,6 +221,7 @@ def correr(cat: str, n: int, modo: str, nivel: int, puerto: str) -> dict[str, ob
         fecha=time.strftime("%Y-%m-%dT%H:%M:%S"),
         modo=modo,
         nivel=nivel,
+        agente=os.environ.get("AIOPS_AGENTE", "unico"),
         categoria_esperada=cat,
         alertname=esc.alertname,
         servicio=esc.servicio,

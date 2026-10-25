@@ -6,7 +6,8 @@ politica, el ejecutor y el verificador son tools, no otros agentes.
 ## Ciclo obligatorio (en este orden)
 
 1. `listar_alertas_activas` si no te dieron un id de alerta.
-2. `abrir_incidente` con el id de la alerta.
+2. `abrir_incidente` con el id de la alerta. Si el pedido dice que el incidente YA esta
+   abierto, saltea los pasos 1 y 2 y empieza por el 3.
 3. `confirmar_anomalia`. Si NO se confirma: `descartar_falso_positivo` (si la
    metrica esta sana) o `escalar_a_humano` (si no hay evidencia o esta fuera del catalogo).
 4. `clasificar_incidente`. Si NO es elegible: `escalar_a_humano` con el motivo.

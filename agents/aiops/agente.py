@@ -15,6 +15,7 @@ y la aprobacion humana (Ciclo.aprobar) las exige el dominio en cada ejecucion. S
 
 from __future__ import annotations
 
+import os
 from typing import Any
 
 from app import loader
@@ -30,7 +31,15 @@ def modelo_por_defecto() -> str:
 
 
 def construir(modelo: Any = None) -> Any:
-    """`modelo`: un BaseChatModel ya armado (el de la UI) o None para el de agent.yaml."""
+    """`modelo`: un BaseChatModel ya armado (el de la UI) o None para el de agent.yaml.
+
+    `AIOPS_AGENTE=deepagents` usa el orquestador + subagente de la plantilla
+    (app/main.py): es el brazo de comparacion del experimento, no el modo normal."""
+    if os.environ.get("AIOPS_AGENTE", "unico") == "deepagents":
+        from app.main import build_agent
+
+        return build_agent(modelo)
+
     from langchain.agents import create_agent
 
     definicion = _definicion(modelo)
