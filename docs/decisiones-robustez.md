@@ -423,3 +423,26 @@ las 4 válidas resueltas. Salieron tres defectos del **runner**, no del agente:
 (`certificado_por_vencer`, cuyo certificado vence en 3 días y no tiene recuperación) nunca
 vuelve a Normal y no puede pasar por el webhook: esa categoría, y `disco_lleno` (que no es
 remediable), se miden por la vía directa.
+
+## D19. El worker corre con scheduler: un reintento no puede bloquear las alertas siguientes
+
+**Problema (hallado en vivo, 2026-10-25).** El webhook encola con
+`Retry(max=2, interval=[30, 120])`. Un reintento con espera deja el job en estado
+`scheduled`, y **solo un worker con scheduler** lo vuelve a encolar; el worker se lanzaba
+sin él (`rq worker …`). Además el webhook deduplica por id de alerta y trata `scheduled`
+como "en curso". Resultado: **un solo job que fallara una vez bloqueaba para siempre
+todas las alertas con esa huella de Grafana**. Lo detonó el corte de una corrida (el
+worker murió a mitad de un job), pero cualquier falla transitoria del LLM o un servicio
+ocupado lo habría hecho igual. En el laboratorio se vio como `pod_fallido` que "nunca
+disparaba el webhook" aunque Grafana sí disparaba.
+
+**Diagnóstico.** `rq:job:aiops-webhook-PodFailed_…` en `scheduled` en Redis, un incidente
+`abierto` huérfano, y el job retomado al instante al reiniciar el worker con scheduler.
+Mi primera hipótesis (la transición de estado de Grafana) era incompleta: ese defecto
+también existe y se corrigió (D18), pero no era la causa de este bloqueo.
+
+**Decisión.** `rq worker --with-scheduler`. `tests/test_compose.py` fija la invariante:
+si el webhook usa `Retry(interval=...)`, el comando del worker debe llevar el flag.
+
+**Límite.** El incidente huérfano `abierto` de un worker muerto lo cierra el reconciliador
+(a los 30 min) o el reintento; no es inmediato.

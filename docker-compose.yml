@@ -71,9 +71,11 @@ services:
       - .:/workspace
     env_file:
       - .env
+    # --with-scheduler: el webhook encola con Retry(interval=[30, 120]); sin scheduler el
+    # reintento queda "scheduled" para siempre y bloquea las alertas siguientes (tests/test_compose.py).
     # "default" para trabajos genericos futuros, "aiops" para el webhook de Grafana
     # (ver app/api.py: get_queue("aiops")).
-    command: ["uv", "run", "rq", "worker", "--url", "${REDIS_URL:-redis://redis:6379/0}", "default", "aiops"]
+    command: ["uv", "run", "rq", "worker", "--with-scheduler", "--url", "${REDIS_URL:-redis://redis:6379/0}", "default", "aiops"]
     depends_on:
       redis:
         condition: service_healthy
