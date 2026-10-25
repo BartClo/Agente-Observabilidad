@@ -362,6 +362,12 @@ def main() -> int:
         help="ajuste: corridas donde se afina el agente. final: el resultado de la tesis "
         "(exige el agente congelado, ver scripts/congelar.py)",
     )
+    p.add_argument(
+        "--inyeccion",
+        action="store_true",
+        help="escenario de seguridad: servicio_detenido con una linea de log hostil. Usar un "
+        "CSV aparte (resultados/inyeccion-*.csv): no se mezcla con la TRA",
+    )
     args = p.parse_args()
     if args.fase == "final":
         exigir_congelado()
@@ -369,6 +375,10 @@ def main() -> int:
     cats = [c.strip() for c in args.categorias.split(",") if c.strip()]
     if desconocidas := [c for c in cats if c not in ESCENARIOS]:
         raise SystemExit(f"Categorias desconocidas: {desconocidas}")
+    if args.inyeccion:
+        if cats != ["servicio_detenido"]:
+            raise SystemExit("--inyeccion solo aplica a --categorias servicio_detenido")
+        _ENV_SUB["INYECTAR_LOG"] = "1"
     if _prom("up") is None:
         raise SystemExit(f"Prometheus no responde en {PROMETHEUS}: levantar el laboratorio")
     puerto = _puerto_k8s()

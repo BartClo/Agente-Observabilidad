@@ -317,3 +317,21 @@ cambios sin commitear, si no hay modelo elegido o si hay modelo de respaldo. Las
 
 **Límite.** No detecta cambios en la configuración de Grafana o del laboratorio; esos se
 describen en el protocolo.
+
+## D14. La acción no la elige el LLM: prueba frente a la inyección por telemetría
+
+**Problema.** Hay trabajo reciente (AIOpsDoom, USENIX Security 2026; solo vi resúmenes) que
+muestra que un log puede empujar a un agente hacia una remediación dañina y que los
+filtros de prompt no lo detienen. La mitigación que recomiendan es limitar lo que el
+agente puede hacer.
+
+**Decisión.** La propiedad ya estaba en el diseño: la categoría sale de la alerta, la
+acción de la categoría y las tools de ejecución solo reciben el id del incidente. Se
+agregan tests que la fijan (firma de las tools y un caso con texto hostil en logs y
+diagnóstico) y un escenario en vivo (`experimento --inyeccion`) que escribe una línea
+hostil en el log de `checkout`.
+
+**Qué sí puede hacer un log hostil.** Influir en el diagnóstico, la confianza o el
+escalamiento (disponibilidad), no elegir otra acción ni cerrar sin verificar.
+
+**Límite.** Es evidencia sobre este modelo y este catálogo, no una prueba general.

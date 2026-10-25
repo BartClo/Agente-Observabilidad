@@ -3,6 +3,7 @@ del ciclo L1 y nada mas."""
 
 from __future__ import annotations
 
+import inspect
 import re
 from typing import Any
 
@@ -91,3 +92,15 @@ def test_el_interruptor_elige_el_agente_de_la_plantilla(
     monkeypatch.setenv("AIOPS_AGENTE", "unico")
     unico = agente.construir(ModeloConTools(messages=iter([])))
     assert unico.get_graph() is not None  # un grafo de LangChain, no la tupla de la plantilla
+
+
+@pytest.mark.parametrize(
+    "nombre",
+    ["ejecutar_remediacion", "ejecutar_remediacion_con_aprobacion", "revertir_accion"],
+)
+def test_las_tools_de_ejecucion_no_aceptan_una_accion_del_llm(nombre: str) -> None:
+    """La accion sale de la categoria del catalogo, no de lo que el LLM escriba: estas
+    tools solo reciben el id del incidente, asi un log hostil no puede elegirla."""
+    from agents.aiops import tools
+
+    assert list(inspect.signature(getattr(tools, nombre)).parameters) == ["incidente_id"]
