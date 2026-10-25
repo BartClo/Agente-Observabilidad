@@ -400,3 +400,26 @@ corridas (la ventana de una hora las seguiría mezclando).
 **Límite.** Con 60 s el agente ve menos contexto histórico que un operador en producción;
 se declara como amenaza a la validez. La ventana debe cubrir el retraso entre la falla y la
 alerta: ~10 s por la vía directa y ~30 s por Grafana.
+
+## D18. Tres arreglos del camino real hallados en la primera corrida por webhook
+
+Primera corrida real (2 repeticiones × `pod_fallido`, `servicio_detenido`, `cola_detenida`,
+vía Grafana → webhook → worker → agente): detección **16,6–32,2 s** (mediana 31,9 s), 3 de
+las 4 válidas resueltas. Salieron tres defectos del **runner**, no del agente:
+
+1. **`pod_fallido` nunca disparaba el webhook.** Grafana solo notifica en la *transición* a
+   Alerting; el pod se recupera en segundos y el runner lo volvía a romper antes de que la
+   regla (que evalúa cada 10 s) lo viera en Normal. Ahora espera a que la alerta esté en
+   Normal antes de inyectar (`esperar_alerta_inactiva`).
+2. **Una falla `infra:` dejaba la falla puesta** y contaminaba la corrida siguiente. Ahora
+   se recupera el servicio.
+3. **Tokens y turnos podían leerse como 0.** El worker registra el costo *después* de
+   cerrar o escalar; el runner leía el incidente apenas era terminal. Una corrida que
+   trabajó 7 turnos y ~21 mil tokens apareció con 0 y 0. Ahora espera a que se registre el
+   costo (`_esperar_costo`). Sin esto, el experimento final habría subestimado el costo de
+   forma aleatoria.
+
+**Consecuencia para el diseño del experimento.** Una alerta que está **siempre** en falla
+(`certificado_por_vencer`, cuyo certificado vence en 3 días y no tiene recuperación) nunca
+vuelve a Normal y no puede pasar por el webhook: esa categoría, y `disco_lleno` (que no es
+remediable), se miden por la vía directa.

@@ -36,6 +36,7 @@ from typing import Any
 RAIZ = Path(__file__).resolve().parent.parent
 PROMETHEUS = os.environ.get("EXP_PROMETHEUS", "http://localhost:9090")
 API = os.environ.get("EXP_API", "http://localhost:8010")
+GRAFANA = os.environ.get("EXP_GRAFANA", "http://localhost:3001")
 
 
 @dataclass(frozen=True)
@@ -258,11 +259,52 @@ def buscar_incidente_nuevo(
     return min(candidatos, key=lambda i: float(str(i["abierto_en"]))) if candidatos else None
 
 
+def _alerta_en_alerting(alertname: str) -> bool | None:
+    """True si la regla de Grafana esta disparada o pendiente; False si esta en Normal;
+    None si Grafana no responde o la regla no existe."""
+    try:
+        with urllib.request.urlopen(  # noqa: S310
+            f"{GRAFANA}/api/prometheus/grafana/api/v1/rules", timeout=10
+        ) as r:
+            grupos = json.load(r)["data"]["groups"]
+    except Exception:
+        return None
+    for grupo in grupos:
+        for regla in grupo["rules"]:
+            if regla["name"] == alertname:
+                return bool(regla["state"] != "inactive")
+    return None
+
+
+def esperar_alerta_inactiva(alertname: str, timeout_s: float = 120.0) -> bool:
+    """Camino real: Grafana solo notifica en la TRANSICION a Alerting. Si se vuelve a inyectar
+    antes de que vea la alerta en Normal (pod_fallido se recupera en segundos y la regla
+    evalua cada 10 s), no hay transicion, no hay webhook y el incidente nunca se abre."""
+    limite = time.time() + timeout_s
+    while time.time() < limite:
+        if _alerta_en_alerting(alertname) is False:
+            return True
+        time.sleep(3)
+    return False
+
+
+def _esperar_costo(incidente_id: str, espera_s: float) -> None:
+    """El worker registra el costo (tokens, turnos, modelo) DESPUES de cerrar o escalar: leer
+    el incidente apenas es terminal da turnos=0 y tokens=0 (visto en una corrida real, donde
+    7 turnos aparecian como 0). Espera a que `modelo_llm` este registrado."""
+    limite = time.time() + espera_s
+    while time.time() < limite:
+        if _incidente(incidente_id).get("modelo_llm"):
+            return
+        time.sleep(2)
+
+
 def esperar_camino_real(
     esc: Escenario,
     disparo: float,
     espera_apertura_s: float = 120.0,
     espera_cierre_s: float = 900.0,
+    espera_costo_s: float = 60.0,
 ) -> tuple[str | None, str]:
     """Camino real: Grafana dispara la alerta, el webhook encola y el worker atiende. Espera
     a que se abra el incidente y a que llegue a un estado terminal. Devuelve (id, "") o un
@@ -284,6 +326,7 @@ def esperar_camino_real(
     limite = time.time() + espera_cierre_s
     while time.time() < limite:
         if _incidente(incidente_id)["estado"] in TERMINALES:
+            _esperar_costo(incidente_id, espera_costo_s)
             return incidente_id, ""
         time.sleep(5)
     return incidente_id, (
@@ -351,6 +394,8 @@ def correr(
         _sh(["sh", f"scripts/fallas/{esc.recuperar}"], reintentos=3)
         if not _esperar(esc.anomalia, 240, cumplida=False):
             return fallo("infra: el servicio no volvio a sano antes de la corrida")
+    if via == "webhook" and not esperar_alerta_inactiva(esc.alertname):
+        return fallo("infra: la alerta de Grafana no volvio a Normal antes de la corrida")
     # (2) inyectar y (3) esperar la anomalia
     r = _sh(["sh", f"scripts/fallas/{esc.falla}"], reintentos=3)
     if r.returncode != 0:
@@ -364,6 +409,8 @@ def correr(
         # camino real: Grafana dispara la alerta, el webhook encola y el worker atiende
         incidente_id, motivo = esperar_camino_real(esc, disparo)
         if incidente_id is None:
+            if esc.recuperar:  # no dejar la falla puesta para la corrida siguiente
+                _sh(["sh", f"scripts/fallas/{esc.recuperar}"], reintentos=3)
             return fallo(motivo)
         if motivo:
             fila["error"] = motivo
