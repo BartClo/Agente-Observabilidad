@@ -874,3 +874,17 @@ def test_politica_lee_el_cortacircuito_del_entorno() -> None:
     assert (p.max_acciones_servicio, p.ventana_cortacircuito_s) == (5, 120.0)
     d = politica_desde_entorno({})
     assert (d.max_acciones_servicio, d.ventana_cortacircuito_s) == (3, 3600.0)
+
+
+def test_los_logs_llegan_saneados_al_agente(monkeypatch: pytest.MonkeyPatch) -> None:
+    ciclo, env, alerta_id = armar()
+    monkeypatch.setattr(
+        env,
+        "logs",
+        lambda servicio, n: ["login password=hunter2 de ana@empresa.cl desde 10.1.2.3", "x" * 1000],
+    )
+    inc_id = ciclo.abrir(alerta_id).id
+    lineas = ciclo.logs(inc_id, 10)
+    assert "hunter2" not in lineas[0] and "ana@empresa.cl" not in lineas[0]
+    assert "10.1.2.3" not in lineas[0] and len(lineas[1]) <= 300
+    assert ciclo.auditoria.de_incidente(inc_id)[-1].datos == {"lineas": 2}

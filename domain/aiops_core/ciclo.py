@@ -27,6 +27,7 @@ from domain.aiops_core.modelos import (
 from domain.aiops_core.observabilidad import ObservabilidadPort
 from domain.aiops_core.politicas import Politica, Veredicto
 from domain.aiops_core.repositorio import RepositorioIncidentes, RepositorioIncidentesMemoria
+from domain.aiops_core.saneamiento import sanear_linea
 
 
 class ErrorCiclo(ValueError):
@@ -102,7 +103,10 @@ class Ciclo:
 
     def logs(self, incidente_id: str, lineas: int) -> list[str]:
         inc = self.incidente(incidente_id)
-        salida = self._obs.logs(inc.alerta.servicio, max(1, min(lineas, 200)))
+        salida = [
+            sanear_linea(linea)
+            for linea in self._obs.logs(inc.alerta.servicio, max(1, min(lineas, 200)))
+        ]
         self.auditoria.registrar(incidente_id, "consulta_logs", lineas=len(salida))
         return salida
 

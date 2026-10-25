@@ -273,3 +273,17 @@ recurrente. Los rollbacks no cuentan. 0 apaga el cortacircuito.
 medimos.
 
 **Límite.** Recorre todos los incidentes en cada ejecución (`ponytail:` en el código).
+
+## D11. Saneamiento de los logs que llegan al LLM
+
+**Problema.** Los logs de Loki llegaban crudos al LLM, que corre en un proveedor externo.
+La Tabla 3 de la tesis promete enmascarar identificadores sensibles; no estaba hecho.
+
+**Decisión.** `Ciclo.logs()` pasa cada línea por `sanear_linea`: enmascara contraseñas y
+tokens (`clave=valor`, JSON, `Bearer`, JWT, claves AWS y `sk-`), correos e IP; quita
+caracteres de control y trunca a 300 caracteres. Está en el dominio, así que cubre a todo
+consumidor de logs.
+
+**Límite.** Es por patrones: no garantiza cubrir todo secreto. Las IP de pods se
+enmascaran aunque a veces ayudarían al diagnóstico (se acepta). Los textos de alertas no
+pasan por este filtro.
