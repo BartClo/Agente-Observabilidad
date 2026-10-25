@@ -54,15 +54,18 @@ como `error: infra: ...`, no como fallas del agente).
 ## 2. Línea base manual
 
 Un operador resuelve **las mismas fallas** a mano, con los runbooks de
-`agents/aiops/runbooks/`, sin el agente:
+`agents/aiops/runbooks/`, sin el agente.
 
-1. `sh scripts/fallas/<falla>.sh`
-2. Anotar `disparada_en` cuando la regla aparece *firing* en Grafana
-   (`/d/aiops-l1`, panel "Alertas L1 activas"). Se usa el mismo inicio que el agente.
-3. El operador diagnostica y actúa como lo haría normalmente.
-4. Anotar `resuelto_en` cuando la regla vuelve a *normal*.
-5. Anotar `accion_incorrecta=true` si ejecutó algo que no correspondía o que no arregló
-   la falla.
+Usar el script guiado, que inyecta la misma falla, mide con el mismo criterio que el
+agente y escribe el CSV:
+
+    python -m scripts.linea_base --categoria pod_fallido --operador <nombre> --salida resultados/linea_base.csv
+
+El operador resuelve la falla con los runbooks mientras corre el cronómetro; al dejar de
+verse la alerta el script pregunta si hubo alguna acción incorrecta. Repetir ≥ 3 veces por
+categoría remediable (`pod_fallido`, `servicio_detenido`), idealmente con más de un
+operador. El fin se mide cuando la alerta deja de verse; el agente cierra después de su
+propia verificación, así que la comparación es levemente conservadora frente a H2.
 
 Registrar en `resultados/linea_base.csv` (plantilla: `resultados/linea_base.ejemplo.csv`,
 columnas `categoria,mttr_s,accion_incorrecta,operador,notas`). Idealmente, 3 o más
