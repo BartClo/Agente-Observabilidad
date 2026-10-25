@@ -305,3 +305,15 @@ y modelo, lo que se declara como amenaza a la validez.
 **Efecto colateral.** Se agregó `scripts/__init__.py`: sin él, mypy veía
 `scripts/analizar_experimento.py` con dos nombres de módulo cuando un test lo importa.
 Los scripts siguen corriendo igual (`python scripts/x.py` y `python -m scripts.x`).
+
+## D13. Congelar el agente antes del experimento final
+
+**Problema.** "No cambiar el prompt a mitad del experimento" dependía de la disciplina.
+
+**Decisión.** `python -m scripts.congelar` registra commit, modelo, agente, umbral y los
+hashes del prompt y de los runbooks en `resultados/congelado.json`, y se niega si hay
+cambios sin commitear, si no hay modelo elegido o si hay modelo de respaldo. Las corridas
+`--fase final` verifican que `HEAD` sea el congelado y el árbol esté limpio.
+
+**Límite.** No detecta cambios en la configuración de Grafana o del laboratorio; esos se
+describen en el protocolo.

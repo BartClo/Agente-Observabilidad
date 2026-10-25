@@ -316,6 +316,29 @@ def correr(
     return fila
 
 
+def _git_salida(*args: str) -> str:
+    return subprocess.run(
+        ["git", *args], cwd=RAIZ, capture_output=True, text=True, check=True
+    ).stdout.strip()
+
+
+def exigir_congelado() -> None:
+    """`--fase final` solo corre sobre el agente congelado (scripts/congelar.py): cambiar el
+    prompt, el modelo o el codigo a mitad del experimento invalida la comparacion."""
+    ruta = RAIZ / "resultados" / "congelado.json"
+    if not ruta.exists():
+        raise SystemExit("Falta resultados/congelado.json: correr python -m scripts.congelar")
+    registro = json.loads(ruta.read_text(encoding="utf-8"))
+    actual = _git_salida("rev-parse", "HEAD")
+    if registro["commit"] != actual:
+        raise SystemExit(
+            f"HEAD {actual[:8]} != congelado {str(registro['commit'])[:8]}: el codigo cambio "
+            "despues de congelar. Volver al commit congelado o congelar de nuevo y repetir"
+        )
+    if _git_salida("status", "--porcelain", "--untracked-files=no"):
+        raise SystemExit("Hay cambios sin commitear: el agente ya no es el congelado")
+
+
 def main() -> int:
     p = argparse.ArgumentParser(description="Experimento de la Fase 7.")
     p.add_argument(
@@ -340,6 +363,8 @@ def main() -> int:
         "(exige el agente congelado, ver scripts/congelar.py)",
     )
     args = p.parse_args()
+    if args.fase == "final":
+        exigir_congelado()
 
     cats = [c.strip() for c in args.categorias.split(",") if c.strip()]
     if desconocidas := [c for c in cats if c not in ESCENARIOS]:
