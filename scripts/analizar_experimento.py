@@ -68,16 +68,31 @@ def tabla_hipotesis(hs: Sequence[ev.Hipotesis]) -> str:
     return "\n".join(filas)
 
 
+def filtrar_fase(filas: Sequence[dict[str, str]], fase: str) -> list[dict[str, str]]:
+    """Las corridas de AJUSTE (donde se afina el prompt) no entran en el resultado final:
+    medir sobre lo que se uso para afinar infla el resultado. Un CSV sin columna `fase`
+    se trata como ajuste."""
+    if fase == "todas":
+        return list(filas)
+    return [f for f in filas if f.get("fase", "ajuste") == fase]
+
+
 def main(argv: list[str]) -> int:
     p = argparse.ArgumentParser(description="Resume un experimento de la Fase 7.")
     p.add_argument("csv")
     p.add_argument("--linea-base", default=None, help="CSV de la linea base manual")
+    p.add_argument(
+        "--fase",
+        choices=("final", "ajuste", "todas"),
+        default="final",
+        help="que corridas analizar; el resultado de la tesis es --fase final",
+    )
     args = p.parse_args(argv)
     # La consola de Windows usa cp1252 por defecto y rompe los acentos de las tablas.
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")
 
-    todas = _leer(args.csv)
+    todas = filtrar_fase(_leer(args.csv), args.fase)
     # Las corridas que fallaron por infraestructura (kubectl, Prometheus, inyeccion) no
     # son decisiones del agente: contarlas como "elegible no resuelto" bajaria la TRA
     # injustamente. Se excluyen y se reportan aparte. Los errores del agente SI cuentan.
@@ -90,6 +105,7 @@ def main(argv: list[str]) -> int:
     modos = sorted({f.get("modo", "?") for f in filas})
 
     print(f"## Resultados: {args.csv}\n")
+    print(f"Fase analizada: **{args.fase}**\n")
     print(
         f"Modo: {', '.join(modos)} · corridas válidas: {len(corridas)}"
         f" · excluidas por infraestructura: {len(infra)}\n"
@@ -105,6 +121,14 @@ def main(argv: list[str]) -> int:
         print("> **Atención:** modo `script` (diagnóstico fijo). Prueba la plomería del")
         print("> experimento; NO mide al agente. Correr con `--modo llm` para la tesis.\n")
     print(tabla_por_categoria(corridas), "\n")
+    try:
+        tra_pct, lo, hi, n_elegibles = ev.tra_con_intervalo(corridas)
+        print(
+            f"TRA global: **{tra_pct:.1f} %** (IC 95 % de Wilson: {lo:.1f}–{hi:.1f} %, "
+            f"n = {n_elegibles} elegibles)\n"
+        )
+    except ValueError:
+        pass
     print("## Hipótesis\n")
     print(tabla_hipotesis(ev.contrastar(corridas, base)))
     return 0

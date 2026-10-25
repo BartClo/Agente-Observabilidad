@@ -17,6 +17,7 @@ Decisiones metodologicas (documentadas en docs/protocolo-experimento.md):
 
 from __future__ import annotations
 
+import math
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 
@@ -113,6 +114,29 @@ def tra(corridas: Sequence[Corrida]) -> float:
     if not elegibles:
         raise ValueError("No hay corridas elegibles: la TRA no esta definida")
     return 100 * sum(c.resuelto_autonomo for c in elegibles) / len(elegibles)
+
+
+def intervalo_wilson(exitos: int, n: int, z: float = 1.96) -> tuple[float, float]:
+    """Intervalo de confianza de Wilson (95 % por defecto) para una proporcion, en %.
+    Con n chico un porcentaje sin su intervalo engana: 3 de 5 es 60 % pero el intervalo va
+    de 23 % a 88 %."""
+    if n <= 0 or not 0 <= exitos <= n:
+        raise ValueError("n debe ser positivo y 0 <= exitos <= n")
+    p = exitos / n
+    denom = 1 + z * z / n
+    centro = (p + z * z / (2 * n)) / denom
+    margen = z * math.sqrt(p * (1 - p) / n + z * z / (4 * n * n)) / denom
+    return max(0.0, 100 * (centro - margen)), min(100.0, 100 * (centro + margen))
+
+
+def tra_con_intervalo(corridas: Sequence[Corrida]) -> tuple[float, float, float, int]:
+    """(TRA %, limite inferior %, limite superior %, n de elegibles)."""
+    elegibles = [c for c in corridas if c.elegible]
+    if not elegibles:
+        raise ValueError("No hay corridas elegibles: la TRA no esta definida")
+    k = sum(c.resuelto_autonomo for c in elegibles)
+    lo, hi = intervalo_wilson(k, len(elegibles))
+    return 100 * k / len(elegibles), lo, hi, len(elegibles)
 
 
 def mttr(corridas: Iterable[Corrida]) -> float:

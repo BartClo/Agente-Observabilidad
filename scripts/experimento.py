@@ -90,6 +90,7 @@ COLUMNAS = [
     "corrida",
     "fecha",
     "modo",
+    "fase",
     "nivel",
     "agente",
     "categoria_esperada",
@@ -213,13 +214,16 @@ def _env_ciclo(nivel: int, puerto: str) -> list[str]:
     return [a for k, v in env.items() for a in ("-e", f"{k}={v}")]
 
 
-def correr(cat: str, n: int, modo: str, nivel: int, puerto: str) -> dict[str, object]:
+def correr(
+    cat: str, n: int, modo: str, nivel: int, puerto: str, fase: str = "ajuste"
+) -> dict[str, object]:
     esc = ESCENARIOS[cat]
     fila: dict[str, object] = {c: "" for c in COLUMNAS}
     fila.update(
         corrida=n,
         fecha=time.strftime("%Y-%m-%dT%H:%M:%S"),
         modo=modo,
+        fase=fase,
         nivel=nivel,
         agente=os.environ.get("AIOPS_AGENTE", "unico"),
         categoria_esperada=cat,
@@ -328,6 +332,13 @@ def main() -> int:
     )
     p.add_argument("--modo", choices=("script", "llm"), default="script")
     p.add_argument("--salida", required=True)
+    p.add_argument(
+        "--fase",
+        choices=("ajuste", "final"),
+        default="ajuste",
+        help="ajuste: corridas donde se afina el agente. final: el resultado de la tesis "
+        "(exige el agente congelado, ver scripts/congelar.py)",
+    )
     args = p.parse_args()
 
     cats = [c.strip() for c in args.categorias.split(",") if c.strip()]
@@ -347,7 +358,7 @@ def main() -> int:
         for n in range(1, args.repeticiones + 1):
             for cat in cats:  # intercalado: una categoria lenta no concentra sus corridas
                 print(f"[{n}/{args.repeticiones}] {cat} (modo {args.modo}, nivel {args.nivel})")
-                w.writerow(correr(cat, n, args.modo, args.nivel, puerto))
+                w.writerow(correr(cat, n, args.modo, args.nivel, puerto, args.fase))
                 f.flush()  # una corrida cortada no pierde las anteriores
     print(f"Listo: {salida}")
     return 0

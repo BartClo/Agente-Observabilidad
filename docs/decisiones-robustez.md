@@ -287,3 +287,21 @@ consumidor de logs.
 **Límite.** Es por patrones: no garantiza cubrir todo secreto. Las IP de pods se
 enmascaran aunque a veces ayudarían al diagnóstico (se acepta). Los textos de alertas no
 pasan por este filtro.
+
+## D12. Fases ajuste/final e intervalos de confianza
+
+**Problema.** Con 5 repeticiones por categoría, "60 %" puede ser 23–88 %. Y afinar el
+prompt con las mismas corridas con que se mide infla el resultado (Google SRE llama
+"hill climbing" a eso; Datadog vio una mejora que empeoraba en el conjunto completo).
+
+**Decisión.** El CSV registra `fase` (`ajuste` o `final`); el análisis usa por defecto solo
+`final` e imprime la TRA con su intervalo de Wilson al 95 %. No se afirma significancia
+estadística: se reporta el valor, el intervalo y `n`. Un CSV sin columna `fase` (las
+corridas de humo anteriores) se trata como ajuste.
+
+**Límite.** Wilson supone corridas independientes; las del laboratorio comparten máquina
+y modelo, lo que se declara como amenaza a la validez.
+
+**Efecto colateral.** Se agregó `scripts/__init__.py`: sin él, mypy veía
+`scripts/analizar_experimento.py` con dos nombres de módulo cuando un test lo importa.
+Los scripts siguen corriendo igual (`python scripts/x.py` y `python -m scripts.x`).

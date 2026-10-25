@@ -136,3 +136,31 @@ def test_linea_base_valida() -> None:
         ev.CorridaManual.desde_fila({"categoria": "pod_fallido", "mttr_s": "0"})
     with pytest.raises(ValueError, match="desconocida"):
         ev.CorridaManual.desde_fila({"categoria": "x", "mttr_s": "10"})
+
+
+def test_intervalo_de_wilson_con_valores_conocidos() -> None:
+    lo, hi = ev.intervalo_wilson(3, 5)
+    assert abs(lo - 23.07) < 0.05 and abs(hi - 88.24) < 0.05
+    lo0, hi0 = ev.intervalo_wilson(0, 5)
+    assert lo0 == 0.0 and abs(hi0 - 43.45) < 0.05
+    lo5, hi5 = ev.intervalo_wilson(5, 5)
+    assert hi5 == 100.0 and abs(lo5 - 56.55) < 0.05
+    for malo in ((1, 0), (6, 5), (-1, 5)):
+        try:
+            ev.intervalo_wilson(*malo)
+        except ValueError:
+            continue
+        raise AssertionError(f"debio rechazar {malo}")
+
+
+def test_tra_con_intervalo_solo_cuenta_elegibles() -> None:
+    escala = {"resuelto_autonomo": "False", "estado": "escalado"}
+    corridas = [_c(), _c(), _c(), _c(**escala), _c(**escala)]
+    t, lo, hi, n = ev.tra_con_intervalo(corridas)
+    assert (t, n) == (60.0, 5)
+    assert abs(lo - 23.07) < 0.05 and abs(hi - 88.24) < 0.05
+    try:
+        ev.tra_con_intervalo([])
+    except ValueError:
+        return
+    raise AssertionError("sin elegibles la TRA no esta definida")
