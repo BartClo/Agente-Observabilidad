@@ -39,6 +39,7 @@ dependencies = [
     "langchain-deepseek>=1.1.0",
     # Cifrado de las API keys guardadas en Postgres (Fernet, AIOPS_SECRETS_KEY).
     "cryptography>=50.0.1",
+    "pypdf>=6.21.2",
 ]
 
 [dependency-groups]

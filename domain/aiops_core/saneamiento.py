@@ -32,8 +32,14 @@ _PATRONES: tuple[tuple[re.Pattern[str], str], ...] = (
 )
 
 
-def sanear_linea(linea: str) -> str:
-    texto = _CONTROL.sub(" ", linea)
+def enmascarar(texto: str) -> str:
+    """Solo los patrones de secretos y datos personales: sin tocar saltos de linea ni largo.
+    Para documentos que se indexan (rag/ingest.py)."""
     for patron, reemplazo in _PATRONES:
         texto = patron.sub(reemplazo, texto)
+    return texto
+
+
+def sanear_linea(linea: str) -> str:
+    texto = enmascarar(_CONTROL.sub(" ", linea))
     return texto if len(texto) <= MAX_LINEA else texto[: MAX_LINEA - 1] + "…"

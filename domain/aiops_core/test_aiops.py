@@ -988,3 +988,13 @@ def test_registrar_fuentes_no_duplica() -> None:
     ciclo.registrar_fuentes(inc_id, ["C1", "C2"])
     ciclo.registrar_fuentes(inc_id, ["C2", "C3"])
     assert ciclo.incidente(inc_id).fuentes_recuperadas == ["C1", "C2", "C3"]
+
+
+def test_enmascarar_conserva_saltos_de_linea_y_largo() -> None:
+    from domain.aiops_core.saneamiento import enmascarar
+
+    largo = "x" * 500
+    texto = f"linea 1 password=abc123\n{largo}\nmail a@b.com"
+    salida = enmascarar(texto)
+    assert "abc123" not in salida and "a@b.com" not in salida
+    assert salida.count("\n") == 2 and largo in salida
