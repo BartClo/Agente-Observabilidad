@@ -49,6 +49,7 @@ def test_el_chat_no_tiene_tools_de_escritura() -> None:
         "ver_metricas",
         "capacidades",
         "leer_runbook",
+        "buscar_conocimiento",  # solo lectura: no registra fuentes ni toca incidentes
     }
 
 

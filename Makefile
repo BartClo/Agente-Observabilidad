@@ -2,7 +2,7 @@ COMPOSE = docker compose
 RUN = $(COMPOSE) run --rm app
 
 .PHONY: build lock check lint format typecheck test coverage evals run shell down logs \
-	rag-init-db rag-ingest rag-query aiops-ingest aiops-demo migrate migrate-down \
+	rag-indexar rag-listar aiops-ingest aiops-demo migrate migrate-down \
 	falla-servicio recuperar-servicio falla-disco recuperar-disco falla-pod recuperar-pod \
 	falla-cola falla-certificado
 
@@ -44,19 +44,18 @@ shell:
 down:
 	$(COMPOSE) down -v
 
-# Ver rag/README.md. Ej: make rag-ingest COLLECTION=demo SRC=agents/_template/skills
-rag-init-db:
-	$(RUN) uv run python -m rag.cli init-db
+# Base de conocimiento (RAG): ver rag/README.md. Requiere la key de Gemini cargada desde la UI.
+# Ej: make rag-indexar RUTA=corpus
+rag-indexar:
+	$(RUN) uv run python -m rag.cli indexar $(RUTA)
 
-rag-ingest:
-	$(RUN) uv run python -m rag.cli ingest $(COLLECTION) $(SRC)
-
-rag-query:
-	$(RUN) uv run python -m rag.cli query $(COLLECTION) "$(Q)"
+rag-listar:
+	$(RUN) uv run python -m rag.cli listar
 
 # Agente aiops: ver docs/aiops-agent.md
 aiops-ingest:
-	$(RUN) uv run python -m rag.cli ingest aiops_runbooks agents/aiops/runbooks
+	$(RUN) uv run python -m rag.cli indexar agents/aiops/runbooks --tipo runbook
+	$(RUN) uv run python -m rag.cli indexar corpus
 
 AIOPS_DEMO_LEVEL ?= 3
 aiops-demo:

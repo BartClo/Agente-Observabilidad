@@ -44,7 +44,10 @@ def _separar_encabezado(texto: str) -> tuple[dict[str, str], str]:
     return meta, texto[fin + 4 :].lstrip("\n")
 
 
-def leer_markdown(texto: str, nombre: str, origen: str = "repo") -> tuple[Documento, Paginas]:
+def leer_markdown(
+    texto: str, nombre: str, origen: str = "repo", tipo: str = "otro"
+) -> tuple[Documento, Paginas]:
+    """`tipo` es el valor por defecto si el encabezado no declara uno."""
     meta, cuerpo = _separar_encabezado(texto)
     try:
         vigente = date.fromisoformat(meta["vigente_desde"]) if "vigente_desde" in meta else None
@@ -56,7 +59,7 @@ def leer_markdown(texto: str, nombre: str, origen: str = "repo") -> tuple[Docume
         nombre=nombre,
         origen=origen,
         servicios=servicios,
-        tipo=meta.get("tipo", "otro"),
+        tipo=meta.get("tipo", tipo),
         vigente_desde=vigente,
         obsoleto=meta.get("obsoleto", "false").lower() == "true",
         sha256=_sha(datos),

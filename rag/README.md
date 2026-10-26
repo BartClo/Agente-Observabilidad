@@ -1,49 +1,43 @@
-# rag/
+# rag/ — base de conocimiento
 
-Componente de retrieval generico (no es especifico de ningun agente). Vive al
-mismo nivel que `domain/`: Python puro + Postgres/pgvector + OpenAI embeddings,
-sin imports de deepagents/LangChain/LangGraph (un test lo verifica, igual que
-en `domain/`).
+Python puro + Postgres/pgvector + embeddings de Gemini (`gemini-embedding-001`, 1536
+dimensiones). Diseño: `docs/superpowers/specs/2026-10-25-rag-conocimiento-design.md`.
 
-## Probarlo por terminal, sin agente
+El RAG **informa, no autoriza**: lo usa el agente de incidentes
+(`agents/aiops/conocimiento.py`, filtrado por el servicio del incidente y con citas
+verificadas por el dominio) y el chat de consulta.
+
+## Uso
+
+La key de Gemini se carga cifrada desde la UI (proveedor Google), no en `.env`.
 
 ```bash
-cp .env.example .env   # completar OPENAI_API_KEY
-make rag-init-db
-make rag-ingest COLLECTION=demo SRC=agents/_template/skills
-make rag-query COLLECTION=demo Q="que es esta skill?"
+make rag-indexar RUTA=corpus          # .md y .pdf; metadatos en el encabezado del .md
+make rag-listar
+make aiops-ingest                     # runbooks (tipo runbook) + corpus
 ```
 
-`make rag-query` imprime cada resultado con su `fuente` y distancia — es la
-forma de ver que esta indexado antes de cablearlo a un agente.
+Encabezado de un `.md`:
 
-## Cablearlo a un agente
-
-En `agents/<tu-agente>/agent.yaml` agregar:
-
-```yaml
-rag:
-  collection: mi_coleccion   # la que usaste en `make rag-ingest`
-  k: 4                        # opcional, default 4
+```
+---
+servicios: checkout, api     # vacio = general
+tipo: postmortem             # ficha | arquitectura | postmortem | guia | runbook | otro
+vigente_desde: 2026-08-01
+obsoleto: false
+---
 ```
 
-`app/loader.py` detecta ese bloque y agrega sola una tool `buscar_documentos`
-al subagente — no hace falta escribir nada en `tools.py`. La tool devuelve
-`content` + `source` de cada resultado, para que el agente cite la fuente
-(ver regla 10 del framework: respuestas legales/fiscales necesitan fuente y
-aprobacion humana antes de salir al cliente).
+## Piezas
 
-## Multi-tenant
+- `embeddings.py`: único archivo que conoce al proveedor (Gemini). Lotes de 100, 3
+  intentos, vectores normalizados; los errores nunca incluyen la key.
+- `ingest.py`: lee Markdown y PDF (máx. 5 MB, 200 páginas), enmascara secretos antes de
+  embeber y es idempotente por `sha256`.
+- `chunking.py`: fragmentos con solapamiento; nunca cruzan de página.
+- `store.py`: documentos y fragmentos (esquema en la migración `e5f0b4c8d3a6`); búsqueda
+  coseno con filtros por servicio, obsoleto, origen y tipo, y piso de similitud.
+- `retrieve.py`: adaptador del loader genérico (`rag:` en `agent.yaml`), sin filtro de servicio.
 
-El aislamiento entre tenants hoy se resuelve con la `collection`: si dos
-tenants no deben compartir contenido, usar una `collection` por tenant al
-ingerir (ej. `parafiscal__acme`, `parafiscal__beta`), no la misma collection
-con distinto `tenant_id`. La columna `tenant_id` en `rag_chunks` existe para
-filtrar ademas por ese campo cuando haga falta compartir `collection` entre
-tenants; conectar eso al `tenant_id` real de la request es trabajo de la etapa
-4 (endpoint), no esta resuelto todavia. Ver `docs/open-questions.md`.
-
-## Si hay que cambiar de proveedor de embeddings
-
-Tocar solo `rag/embeddings.py`. `store.py`, `ingest.py` y `retrieve.py` no
-saben que el proveedor es OpenAI.
+Configuración: `AIOPS_RAG` (1), `AIOPS_RAG_K` (4), `AIOPS_RAG_MIN_SIM` (0 hasta calibrar),
+`AIOPS_RAG_ORIGENES` (`repo,subido`), `RAG_EMBEDDING_MODEL`, `RAG_EMBEDDING_DIM`.

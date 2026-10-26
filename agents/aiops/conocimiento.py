@@ -48,6 +48,24 @@ def _origenes() -> tuple[str, ...]:
     return tuple(o.strip() for o in os.environ.get("AIOPS_RAG_ORIGENES", "repo,subido").split(","))
 
 
+def buscar_general(consulta: str) -> str:
+    """Para el chat de consulta: sin incidente, sin filtro de servicio, incluye runbooks
+    indexados y no registra fuentes (el chat no diagnostica). Solo lectura."""
+    if time.monotonic() < _caido_hasta:
+        return NO_DISPONIBLE
+    try:
+        pasajes = store.buscar(
+            embed_consulta(consulta[:MAX_CONSULTA]),
+            servicio=None,
+            k=int(os.environ.get("AIOPS_RAG_K", "4")),
+            min_sim=float(os.environ.get("AIOPS_RAG_MIN_SIM", "0")),
+            origenes=_origenes(),
+        )
+    except Exception:  # el chat sigue respondiendo con sus otras tools
+        return NO_DISPONIBLE
+    return formatear(pasajes) if pasajes else "Sin conocimiento relevante."
+
+
 def buscar(ciclo: Ciclo, incidente_id: str, consulta: str) -> str:
     global _caido_hasta
     inc = ciclo.incidente(incidente_id)  # ErrorCiclo si no existe: lo muestra la tool
