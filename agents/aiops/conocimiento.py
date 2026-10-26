@@ -19,8 +19,8 @@ from rag.types import Pasaje
 
 MAX_CONSULTA = 300
 # Calibrado con corpus/calibracion.json (python -m rag.cli calibrar, 2026-10-25): relevantes
-# 0,733-0,828, irrelevantes 0,541-0,636, piso = punto medio. Recalibrar si cambia el corpus o
-# el modelo de embeddings.
+# 0,739-0,812, irrelevantes 0,543-0,638 (con fragmentos de 700), piso = punto medio.
+# Recalibrar si cambia el corpus, el tamano de fragmento o el modelo de embeddings.
 MIN_SIM_DEFECTO = "0.69"
 # 4 pasajes de ~1000 caracteres subian el costo ~37 % (se reenvian en cada vuelta): medido en vivo
 # 2026-10-25. Con 3 de ~700 el contexto fijo baja ~un 45 %.
