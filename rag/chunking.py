@@ -1,32 +1,31 @@
-"""Trocea texto en pedazos con solapamiento. Logica pura, sin dependencias externas."""
+"""Trocea texto en fragmentos con solapamiento. Logica pura, sin dependencias externas."""
 
 from __future__ import annotations
 
-from rag.types import Chunk
+from rag.types import Fragmento
 
 DEFAULT_CHUNK_SIZE = 1000
 DEFAULT_OVERLAP = 150
 
 
-def chunk_text(
-    text: str, source: str, size: int = DEFAULT_CHUNK_SIZE, overlap: int = DEFAULT_OVERLAP
-) -> list[Chunk]:
-    """Ventana deslizante por caracteres. No entiende de oraciones/parrafos: para
-    algo mas fino (por ejemplo respetar limites de articulo legal), reemplazar
-    esta funcion, no store.py ni ingest.py."""
+def fragmentar(
+    paginas: list[tuple[int | None, str]],
+    size: int = DEFAULT_CHUNK_SIZE,
+    overlap: int = DEFAULT_OVERLAP,
+) -> list[Fragmento]:
+    """Ventana deslizante por caracteres, pagina por pagina (un fragmento nunca cruza de
+    pagina, asi la cita `p.N` es exacta). `orden` numera los fragmentos del documento.
+    No entiende de oraciones: para algo mas fino, reemplazar esta funcion."""
     if size <= overlap:
         raise ValueError("size debe ser mayor que overlap")
-
-    text = text.strip()
-    if not text:
-        return []
-
-    chunks = []
-    start = 0
+    fragmentos: list[Fragmento] = []
     step = size - overlap
-    while start < len(text):
-        piece = text[start : start + size].strip()
-        if piece:
-            chunks.append(Chunk(content=piece, source=source))
-        start += step
-    return chunks
+    for pagina, texto in paginas:
+        texto = texto.strip()
+        for start in range(0, len(texto), step):
+            pieza = texto[start : start + size].strip()
+            if pieza:
+                fragmentos.append(Fragmento(pieza, pagina, len(fragmentos)))
+            if start + size >= len(texto):
+                break
+    return fragmentos
