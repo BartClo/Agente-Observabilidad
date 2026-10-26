@@ -474,3 +474,45 @@ Cumplido** (25,2 s). La detección incluye la latencia de la regla de Grafana (e
   mezclaban pods de corridas anteriores; D17 acota esa ventana para el experimento.
 - El MTTR por el camino real incluye la detección (≈ 25 s) y por eso es mayor que por la
   vía directa. La línea base se mide desde la anomalía visible, igual que el agente.
+
+
+## D20. RAG con citas verificables: diseño, validación en vivo y lo que NO está resuelto
+
+**Decisión (con el autor).** El agente consulta una base de conocimiento (Gemini + pgvector)
+y cita fuentes; el dominio rechaza citas que no se recuperaron en ese incidente. El RAG
+**informa, no autoriza**: la acción la elige el catálogo, la política no lee las citas y un
+fallo del conocimiento no bloquea (pausa de 60 s). Interruptor `AIOPS_RAG`; las corridas
+medidas usan solo el corpus versionado (`AIOPS_RAG_ORIGENES=repo`).
+
+**Calibración.** Piso de similitud 0,69 (relevantes 0,739–0,812; irrelevantes 0,543–0,638;
+24 consultas etiquetadas por el autor del proyecto). Recalibrar si cambia el corpus, el tamaño
+de fragmento o el modelo de embeddings.
+
+**Validación en vivo (ajuste, camino real, DeepSeek `deepseek-chat`, n = 3 por brazo).**
+
+| Brazo | Resueltas | Tokens (mediana) | Confianza (pod / servicio / cola) |
+|---|---|---|---|
+| Sin RAG | 2 de 3 | 23.882 | 0,78 / 0,85 / 0,90 |
+| RAG, 4 pasajes de ~1000 car. | 2 de 3 | 32.773 (+37 %) | 0,62 / 0,82 / 0,85 |
+| RAG, 3 pasajes de ~700 car. | 1 de 3 | 28.200 (+18 %) | 0,45 / 0,72 / 0,82 |
+
+- Citas verificadas: 9 de 9 diagnósticos citaron fuentes que sí habían recuperado.
+- **La confianza fue menor con RAG en las 6 comparaciones.** No hay "lavado de confianza"; el
+  efecto es el contrario: más cautela.
+- **Mecanismo observado en `pod_fallido` (0,45):** el agente relacionó el log con el
+  postmortem del ConfigMap (donde recrear el pod no sirvió) y no pudo descartarlo porque no
+  tiene una tool para leer los eventos del pod. Es razonamiento legítimo, pero baja la TRA.
+- **Límites:** n = 3 por brazo (sin significancia); la variabilidad de la confianza con la
+  misma evidencia ya era de 0,6 a 0,85; el postmortem del ConfigMap reproduce el mismo texto de
+  log que el pod del laboratorio, lo que acentúa el efecto. No se ajustó el prompt ni el
+  corpus con estos datos.
+- **Pendiente:** el criterio "el documento hostil no cambia la acción" solo está probado con
+  tests, no en vivo.
+
+**Otras mejoras de robustez (mismo día).**
+- Simulacro: nivel 0/1 dice qué habría ejecutado y lo audita (evento `simulacro`).
+- El worker reconcilia incidentes colgados al arrancar (`agents/aiops/arranque.py`);
+  verificado en vivo.
+- Respaldo de LLM verificado en vivo: modelo principal inexistente → `BadRequestError` →
+  evento `llm_respaldo` → Gemini retomó el mismo incidente. (El modelo barato lo escaló; eso no
+  es del mecanismo.) Configuración restaurada: activo `deepseek-chat`, sin respaldo.
