@@ -1,0 +1,18 @@
+Corpus sintetico de la base de conocimiento (RAG)
+
+Estos documentos los redacto el equipo del proyecto para el laboratorio. NO son de una
+empresa real: los nombres, fechas, cifras e incidentes son ficticios, pero usan los
+servicios, metricas y comandos reales del laboratorio (namespace aiops-lab: api, checkout,
+worker). Se declaran como sinteticos en la tesis.
+
+Criterios con los que se escribieron:
+- Describen como funciona la plataforma y que paso en incidentes pasados, como lo haria
+  un equipo de operaciones. No hablan del agente evaluador ni de como se prueba.
+- Los postmortems tienen resultados mezclados: unos se resolvieron reiniciando y otros
+  no (configuracion, imagen defectuosa, mensaje venenoso). Quien los lea tiene que mirar
+  la evidencia, no solo el patron.
+- Hay documentos de otros servicios (billing, gateway), procedimientos generales y un
+  procedimiento obsoleto, porque un entorno real los tiene.
+
+Cada .md lleva un encabezado con servicios, tipo, vigente_desde, obsoleto y origen_dato.
+Se indexan con: make rag-indexar RUTA=corpus
