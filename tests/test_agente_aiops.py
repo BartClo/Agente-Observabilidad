@@ -25,11 +25,12 @@ def test_solo_tiene_las_tools_del_ciclo_l1() -> None:
     nombres = {t.__name__ for t in agente._definicion()["tools"]}
     assert nombres == {
         "listar_alertas_activas", "abrir_incidente", "confirmar_anomalia", "consultar_logs",
-        "clasificar_incidente", "registrar_diagnostico", "ejecutar_remediacion",
-        "ejecutar_remediacion_con_aprobacion", "verificar_recuperacion", "revertir_accion",
+        "clasificar_incidente", "buscar_conocimiento", "registrar_diagnostico",
+        "ejecutar_remediacion", "ejecutar_remediacion_con_aprobacion",
+        "verificar_recuperacion", "revertir_accion",
         "escalar_a_humano", "cerrar_incidente", "descartar_falso_positivo", "estado_incidente",
     }  # fmt: skip
-    # sin buscar_documentos (el runbook llega con clasificar_incidente), ni archivos, ni task
+    # sin buscar_documentos (RAG generico), ni archivos, ni task
     assert "buscar_documentos" not in nombres
 
 

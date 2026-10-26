@@ -16,13 +16,26 @@ y la aprobacion humana (Ciclo.aprobar) las exige el dominio en cada ejecucion. S
 from __future__ import annotations
 
 import os
+import re
 from typing import Any
 
 from app import loader
 
 
 def _definicion(modelo: Any = None) -> Any:
-    return loader.cargar_agente("aiops", modelo)
+    """Definicion de agent.yaml. `AIOPS_RAG=0` quita la tool de conocimiento y su parte del
+    prompt (marcada con <!--rag-->...<!--/rag-->): es el brazo "sin RAG" del experimento."""
+    definicion = loader.cargar_agente("aiops", modelo)
+    prompt = definicion["system_prompt"]
+    if os.environ.get("AIOPS_RAG", "1") == "0":
+        definicion["tools"] = [
+            t for t in definicion["tools"] if getattr(t, "__name__", "") != "buscar_conocimiento"
+        ]
+        prompt = re.sub(r"<!--rag-->.*?<!--/rag-->", "", prompt, flags=re.DOTALL)
+    else:
+        prompt = prompt.replace("<!--rag-->", "").replace("<!--/rag-->", "")
+    definicion["system_prompt"] = prompt
+    return definicion
 
 
 def modelo_por_defecto() -> str:

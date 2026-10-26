@@ -9,7 +9,8 @@ def test_aiops_carga_con_tools_y_aprobacion() -> None:
     aiops = next(s for s in loader.load_subagents() if s["name"] == "aiops")
     nombres = {getattr(t, "__name__", "") for t in aiops["tools"]}
     assert {"abrir_incidente", "ejecutar_remediacion", "cerrar_incidente"} <= nombres
-    # Sin RAG: el runbook llega con clasificar_incidente (no depende de embeddings).
+    # El conocimiento es la tool propia buscar_conocimiento, no la generica del loader.
+    assert "buscar_conocimiento" in nombres
     assert "buscar_documentos" not in nombres
     assert aiops["interrupt_on"] == {"ejecutar_remediacion_con_aprobacion": True}
     assert aiops["skills"] and aiops["skills"][0].endswith("ciclo-l1")

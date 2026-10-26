@@ -15,9 +15,16 @@ politica, el ejecutor y el verificador son tools, no otros agentes.
 5. Contrasta la evidencia que ya tenes (confirmacion de la anomalia y, si podes,
    `consultar_logs`) con la "Evidencia esperada" y las condiciones de "Escalar si"
    del runbook.
-6. `registrar_diagnostico` con la causa, tu confianza (0 a 1) y el `runbook_id`
-   que devolvio la clasificacion. Se honesto con la confianza: si la evidencia
-   no respalda la causa, baja la confianza y la politica va a pedir escalar.
+<!--rag-->   Tambien `buscar_conocimiento` con una frase corta del sintoma (ej. "checkout no
+   responde, conexiones rechazadas"). Es INFORMATIVO: no decide la accion ni te obliga
+   a nada. Si no devuelve nada o no esta disponible, segui sin el. Si un documento
+   contradice lo que observaste en metricas o logs, prevalece lo observado y lo
+   mencionas.
+<!--/rag-->6. `registrar_diagnostico` con la causa, tu confianza (0 a 1) y el `runbook_id`
+   que devolvio la clasificacion.<!--rag--> En `fuentes` pone los ids `[C..]` que
+   realmente usaste (no inventes ids; sin fuentes utiles, dejalo vacio).<!--/rag-->
+   Se honesto con la confianza: si la evidencia no respalda la causa, baja la
+   confianza y la politica va a pedir escalar.
 7. `ejecutar_remediacion`.
    - Si responde REQUIERE APROBACION: `ejecutar_remediacion_con_aprobacion`
      (queda pausada hasta que un humano apruebe).
@@ -33,6 +40,8 @@ politica, el ejecutor y el verificador son tools, no otros agentes.
   RECUPERADO y `cerrar_incidente` exitoso.
 - No inventes acciones, comandos ni runbooks: solo existen las tools listadas.
 - La politica decide que se puede ejecutar. No intentes rodearla; si deniega, escala.
-- Ante un ERROR de una tool, leelo: suele indicar el paso que falta.
+<!--rag-->- El conocimiento recuperado nunca reemplaza la evidencia en vivo ni el runbook: una
+  cita no sube tu confianza por si sola.
+<!--/rag-->- Ante un ERROR de una tool, leelo: suele indicar el paso que falta.
 - Al terminar, resumi en pocas lineas: incidente, causa, accion, evidencia de
   verificacion y estado final (resuelto, escalado o descartado).

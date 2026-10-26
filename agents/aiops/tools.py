@@ -10,6 +10,7 @@ from collections.abc import Callable
 from functools import wraps
 from pathlib import Path
 
+from agents.aiops import conocimiento
 from agents.aiops.runtime import get_ciclo
 from domain.aiops_core.acciones import AccionNoPermitida
 from domain.aiops_core.ciclo import ErrorCiclo
@@ -91,10 +92,22 @@ def clasificar_incidente(incidente_id: str) -> str:
 
 
 @_seguro
-def registrar_diagnostico(incidente_id: str, causa: str, confianza: float, runbook_id: str) -> str:
+def buscar_conocimiento(incidente_id: str, consulta: str) -> str:
+    """Busca en fichas de servicio, arquitectura y postmortems pasajes relacionados con el
+    sintoma (frase corta). INFORMATIVO: no decide la accion ni te obliga a nada; si no
+    devuelve resultados o no esta disponible, segui con la evidencia y el runbook."""
+    return conocimiento.buscar(get_ciclo(), incidente_id, consulta)
+
+
+@_seguro
+def registrar_diagnostico(
+    incidente_id: str, causa: str, confianza: float, runbook_id: str, fuentes: str = ""
+) -> str:
     """Registra la causa probable, la confianza (0 a 1) y el runbook que la respalda.
-    El runbook debe ser el que devolvio clasificar_incidente."""
-    get_ciclo().registrar_diagnostico(incidente_id, causa, confianza, runbook_id)
+    El runbook debe ser el que devolvio clasificar_incidente. `fuentes`: ids [C..] de
+    buscar_conocimiento que realmente usaste, separados por coma (vacio si ninguno)."""
+    citadas = [f.strip() for f in fuentes.split(",") if f.strip()]
+    get_ciclo().registrar_diagnostico(incidente_id, causa, confianza, runbook_id, fuentes=citadas)
     return f"Diagnostico registrado para {incidente_id}. Siguiente: ejecutar_remediacion."
 
 

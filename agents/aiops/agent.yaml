@@ -11,6 +11,7 @@ tools:
   - tools:confirmar_anomalia
   - tools:consultar_logs
   - tools:clasificar_incidente
+  - tools:buscar_conocimiento
   - tools:registrar_diagnostico
   - tools:ejecutar_remediacion
   - tools:ejecutar_remediacion_con_aprobacion
@@ -21,9 +22,9 @@ tools:
   - tools:descartar_falso_positivo
   - tools:estado_incidente
 skills: skills
-# Sin `rag:` a proposito: el runbook de la categoria lo devuelve clasificar_incidente,
-# leido del archivo (sin embeddings, funciona con cualquier proveedor de LLM y ahorra
-# una vuelta del agente). El RAG queda para bases documentales grandes.
+# Sin bloque `rag:` a proposito: el conocimiento lo da la tool propia buscar_conocimiento
+# (filtrada por el servicio del incidente y con citas verificadas por el dominio); el
+# runbook de la categoria sigue llegando por id con clasificar_incidente. AIOPS_RAG=0 la apaga.
 # Autonomia nivel 2: la ejecucion con aprobacion queda pausada hasta que un humano
 # la apruebe. ejecutar_remediacion (sin aprobacion) la controla la politica de domain/.
 require_approval:
