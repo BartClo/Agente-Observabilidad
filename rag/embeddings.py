@@ -11,9 +11,9 @@ import time
 import urllib.request
 from typing import Any
 
-EMBEDDING_MODEL = os.environ.get("RAG_EMBEDDING_MODEL", "gemini-embedding-001")
+EMBEDDING_MODEL = os.environ.get("AIOPS_EMBEDDING_MODEL", "gemini-embedding-001")
 # Debe coincidir con `embedding vector(N)` de la migracion de rag_chunks.
-EMBEDDING_DIM = int(os.environ.get("RAG_EMBEDDING_DIM", "1536"))
+EMBEDDING_DIM = int(os.environ.get("AIOPS_EMBEDDING_DIM", "1536"))
 _URL = "https://generativelanguage.googleapis.com/v1beta/models/{m}:batchEmbedContents"
 _LOTE = 100
 _INTENTOS = 3

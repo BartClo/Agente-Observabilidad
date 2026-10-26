@@ -145,8 +145,9 @@ pero el agente no los recibe por esta vía porque ya le llegan por identificador
 ## 9. Configuración
 
 `AIOPS_RAG` (`1`), `AIOPS_RAG_K` (`4`), `AIOPS_RAG_MIN_SIM` (`0` hasta calibrar),
-`AIOPS_RAG_ORIGENES` (`repo,subido`), `RAG_EMBEDDING_MODEL` (`gemini-embedding-001`),
-`RAG_EMBEDDING_DIM` (`1536`). Ninguna lleva secretos.
+`AIOPS_RAG_ORIGENES` (`repo,subido`), `AIOPS_EMBEDDING_MODEL` (`gemini-embedding-001`; antes `RAG_EMBEDDING_MODEL`, renombrada
+porque el `.env.example` viejo traía el modelo de OpenAI y pisaba el valor),
+`AIOPS_EMBEDDING_DIM` (`1536`). Ninguna lleva secretos.
 
 ## 10. Alcance
 

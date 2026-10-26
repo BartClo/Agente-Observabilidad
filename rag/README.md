@@ -40,4 +40,4 @@ obsoleto: false
 - `retrieve.py`: adaptador del loader genérico (`rag:` en `agent.yaml`), sin filtro de servicio.
 
 Configuración: `AIOPS_RAG` (1), `AIOPS_RAG_K` (4), `AIOPS_RAG_MIN_SIM` (0 hasta calibrar),
-`AIOPS_RAG_ORIGENES` (`repo,subido`), `RAG_EMBEDDING_MODEL`, `RAG_EMBEDDING_DIM`.
+`AIOPS_RAG_ORIGENES` (`repo,subido`), `AIOPS_EMBEDDING_MODEL`, `AIOPS_EMBEDDING_DIM`.

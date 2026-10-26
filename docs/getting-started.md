@@ -16,7 +16,7 @@ Variables principales de `.env`:
 | Variable | Uso |
 |---|---|
 | `ANTHROPIC_API_KEY` | Modelo del orquestador y subagentes |
-| `OPENAI_API_KEY`, `RAG_EMBEDDING_MODEL` | Embeddings de `rag/` |
+| `AIOPS_EMBEDDING_MODEL` (opcional) | Modelo de embeddings de `rag/` (Gemini; la key va cifrada desde la UI) |
 | `DATABASE_URL`, `POSTGRES_*` | Postgres (checkpointer, pgvector) |
 | `COMPOSE_PROFILES` | Servicios opcionales: `redis`, `qdrant`, `garage`, `langfuse`, `traefik`, `sandbox` |
 | `REDIS_URL`, `QDRANT_URL`, `S3_*` | Conexión a infra opcional |
