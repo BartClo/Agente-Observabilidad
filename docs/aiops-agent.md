@@ -20,7 +20,7 @@ el agente invoca como tools. No son agentes.
 | Detector/confirmador de anomalías | `Ciclo.confirmar_anomalia` contrasta la alerta con la señal sana de su categoría |
 | Motor de clasificación y elegibilidad | `catalogo.py` + `Ciclo.clasificar` |
 | Motor de diagnóstico | El LLM, con la evidencia de las tools; queda registrado con `registrar_diagnostico` (causa, confianza, runbook) |
-| RAG / base de conocimiento | `rag:` en `agent.yaml` → tool `buscar_documentos` sobre `agents/aiops/runbooks/` |
+| RAG / base de conocimiento | Tool `buscar_conocimiento` (`agents/aiops/conocimiento.py`): Gemini + pgvector, filtrada por el servicio del incidente, con citas que el dominio verifica. Informa, no autoriza. El runbook de la categoría sigue llegando por id con `clasificar_incidente` |
 | Motor de políticas | `politicas.py` (determinista, no lo decide el LLM) |
 | Ejecutor | `acciones.py`: lista autorizada y servicio validado |
 | Verificador | `Ciclo.verificar` vuelve a leer la telemetría |
@@ -61,7 +61,7 @@ Un incidente resuelto con aprobación humana **no** cuenta para la TRA.
 ## Uso
 
 ```bash
-make aiops-ingest      # indexa los runbooks (requiere OPENAI_API_KEY y make rag-init-db)
+make aiops-ingest      # indexa runbooks y corpus/ (requiere la key de Gemini cargada desde la UI)
 make aiops-demo        # LLM + banco simulado, nivel 3; imprime estados y TRA
 make test && make evals
 ```

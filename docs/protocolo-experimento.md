@@ -116,8 +116,11 @@ Imprime tablas Markdown por categoría y el contraste de H1–H3. Si el CSV es d
 4. [ ] Si la corrida de humo escaló sin motivo claro, revisar el prompt
        (`agents/aiops/prompt.md`) **antes** de las repeticiones: cambiarlo a mitad del
        experimento invalida la comparación entre corridas.
-5. [ ] `make aiops-ingest` (requiere `OPENAI_API_KEY` para los embeddings): sin esto,
-       la tool `buscar_documentos` del agente no encuentra los runbooks.
+5. [ ] Base de conocimiento: key de Gemini cargada desde la UI (proveedor Google) y
+       `make aiops-ingest` (runbooks + `corpus/`). Sin esto `buscar_conocimiento` responde
+       "no disponible" y el agente sigue sin RAG (se nota en la columna `fuentes_recuperadas`).
+       Las corridas medidas usan solo `origen=repo` (`AISLAMIENTO`): los PDF subidos no
+       entran. El brazo de comparación es `--sin-rag`; ambos se corren con el mismo modelo.
 6. [ ] Experimento completo, nivel 3 (y nivel 1 como control: con nivel 1 el agente
        solo recomienda, la TRA debe dar 0).
 7. [ ] Línea base manual (sección 2), si no se hizo antes.
