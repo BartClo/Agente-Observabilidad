@@ -998,3 +998,25 @@ def test_enmascarar_conserva_saltos_de_linea_y_largo() -> None:
     salida = enmascarar(texto)
     assert "abc123" not in salida and "a@b.com" not in salida
     assert salida.count("\n") == 2 and largo in salida
+
+
+# --- simulacro (dry-run): nivel 1 dice que habria hecho ---------------------------------
+
+
+def test_nivel_1_es_un_simulacro_que_dice_que_habria_ejecutado() -> None:
+    ciclo, _, a = armar(nivel=NivelAutonomia.RECOMIENDA)
+    inc_id = preparar(ciclo, a)
+    res = ciclo.ejecutar_remediacion(inc_id, aprobada=False)
+    assert not res.ejecutada
+    assert "SIMULACRO" in res.mensaje and "restart_service" in res.mensaje
+    assert "checkout" in res.mensaje
+    assert ciclo.incidente(inc_id).acciones == []  # no se ejecuto nada
+    eventos = [e for e in ciclo.auditoria.de_incidente(inc_id) if e.tipo == "simulacro"]
+    assert eventos and eventos[0].datos["accion"] == "restart_service"
+
+
+def test_un_nivel_que_ejecuta_no_es_simulacro() -> None:
+    ciclo, _, a = armar(nivel=NivelAutonomia.AUTONOMO_CON_ROLLBACK)
+    inc_id = preparar(ciclo, a)
+    res = ciclo.ejecutar_remediacion(inc_id, aprobada=False)
+    assert res.ejecutada and "SIMULACRO" not in res.mensaje

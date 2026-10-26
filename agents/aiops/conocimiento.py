@@ -22,6 +22,9 @@ MAX_CONSULTA = 300
 # 0,733-0,828, irrelevantes 0,541-0,636, piso = punto medio. Recalibrar si cambia el corpus o
 # el modelo de embeddings.
 MIN_SIM_DEFECTO = "0.69"
+# 4 pasajes de ~1000 caracteres subian el costo ~37 % (se reenvian en cada vuelta): medido en vivo
+# 2026-10-25. Con 3 de ~700 el contexto fijo baja ~un 45 %.
+K_DEFECTO = "3"
 PAUSA_S = 60.0
 SIN_RESULTADOS = "Sin conocimiento relevante para este servicio."
 NO_DISPONIBLE = "Conocimiento no disponible por ahora. Continua sin el."
@@ -61,7 +64,7 @@ def buscar_general(consulta: str) -> str:
         pasajes = store.buscar(
             embed_consulta(consulta[:MAX_CONSULTA]),
             servicio=None,
-            k=int(os.environ.get("AIOPS_RAG_K", "4")),
+            k=int(os.environ.get("AIOPS_RAG_K", K_DEFECTO)),
             min_sim=float(os.environ.get("AIOPS_RAG_MIN_SIM", MIN_SIM_DEFECTO)),
             origenes=_origenes(),
         )
@@ -79,7 +82,7 @@ def buscar(ciclo: Ciclo, incidente_id: str, consulta: str) -> str:
         pasajes = store.buscar(
             embed_consulta(consulta[:MAX_CONSULTA]),
             servicio=inc.alerta.servicio,
-            k=int(os.environ.get("AIOPS_RAG_K", "4")),
+            k=int(os.environ.get("AIOPS_RAG_K", K_DEFECTO)),
             min_sim=float(os.environ.get("AIOPS_RAG_MIN_SIM", MIN_SIM_DEFECTO)),
             origenes=_origenes(),
             excluir_tipos=("runbook",),  # el runbook ya llega con clasificar_incidente

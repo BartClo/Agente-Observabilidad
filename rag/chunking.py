@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from rag.types import Fragmento
 
-DEFAULT_CHUNK_SIZE = 1000
-DEFAULT_OVERLAP = 150
+DEFAULT_CHUNK_SIZE = 700
+DEFAULT_OVERLAP = 100
 
 
 def fragmentar(

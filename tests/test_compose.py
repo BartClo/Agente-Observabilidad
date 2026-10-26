@@ -17,5 +17,5 @@ def test_el_worker_corre_con_scheduler_porque_el_webhook_usa_reintentos_con_espe
     api = (RAIZ / "app" / "api.py").read_text(encoding="utf-8")
     assert "Retry(" in api and "interval=" in api
     compose = yaml.safe_load((RAIZ / "docker-compose.yml").read_text(encoding="utf-8"))
-    comando = compose["services"]["worker"]["command"]
+    comando = " ".join(compose["services"]["worker"]["command"])
     assert "--with-scheduler" in comando

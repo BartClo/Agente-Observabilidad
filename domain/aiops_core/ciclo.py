@@ -513,6 +513,19 @@ class Ciclo:
         )
         razones = "; ".join(decision.razones)
         if decision.veredicto is Veredicto.DENEGAR:
+            if self.politica.nivel < NivelAutonomia.CON_APROBACION and not es_rollback:
+                # Nivel 0/1 = simulacro (dry-run): no se ejecuta nada, pero se deja dicho que
+                # habria hecho el agente, para revisarlo o demostrarlo sin tocar la infraestructura.
+                self.auditoria.registrar(
+                    inc.id, "simulacro", accion=accion, servicio=inc.alerta.servicio
+                )
+                return ResultadoEjecucion(
+                    decision.veredicto,
+                    f"SIMULACRO (nivel {int(self.politica.nivel)}): se habria ejecutado "
+                    f"{accion} sobre {inc.alerta.servicio}. No se ejecuto nada. Escalar con "
+                    "esa recomendacion.",
+                    False,
+                )
             return ResultadoEjecucion(decision.veredicto, f"DENEGADO: {razones}. Escalar.", False)
         if decision.veredicto is Veredicto.APROBACION:
             return ResultadoEjecucion(

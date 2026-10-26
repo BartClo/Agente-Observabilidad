@@ -26,7 +26,7 @@ def test_el_experimento_aisla_cada_corrida_de_la_anterior() -> None:
 def test_el_experimento_fija_la_configuracion_del_rag() -> None:
     flags = experimento._env_ciclo(3, "6443")  # noqa: SLF001
     assert "AIOPS_RAG_ORIGENES=repo" in flags  # los PDF subidos no entran en lo medido
-    assert "AIOPS_RAG=1" in flags and "AIOPS_RAG_K=4" in flags
+    assert "AIOPS_RAG=1" in flags and "AIOPS_RAG_K=3" in flags
     assert any(f.startswith("AIOPS_RAG_MIN_SIM=") for f in flags)
 
 
@@ -39,3 +39,4 @@ def test_el_piso_del_experimento_es_el_calibrado() -> None:
     from agents.aiops import conocimiento
 
     assert experimento.CONFIG_RAG["AIOPS_RAG_MIN_SIM"] == conocimiento.MIN_SIM_DEFECTO
+    assert experimento.CONFIG_RAG["AIOPS_RAG_K"] == conocimiento.K_DEFECTO

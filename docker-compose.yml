@@ -75,7 +75,10 @@ services:
     # reintento queda "scheduled" para siempre y bloquea las alertas siguientes (tests/test_compose.py).
     # "default" para trabajos genericos futuros, "aiops" para el webhook de Grafana
     # (ver app/api.py: get_queue("aiops")).
-    command: ["uv", "run", "rq", "worker", "--with-scheduler", "--url", "${REDIS_URL:-redis://redis:6379/0}", "default", "aiops"]
+    # Antes de tomar trabajos reconcilia los incidentes que dejo a medias un worker caido
+    # (agents/aiops/arranque.py). `;` y no `&&`: el worker levanta aunque eso falle. `exec`: rq
+    # queda como proceso principal y recibe las senales de docker stop.
+    command: ["sh", "-c", "uv run python -m agents.aiops.arranque; exec uv run rq worker --with-scheduler --url ${REDIS_URL:-redis://redis:6379/0} default aiops"]
     depends_on:
       redis:
         condition: service_healthy
