@@ -227,11 +227,28 @@ class Ciclo:
         )
         return categoria, inc.elegible, motivos
 
+    def registrar_fuentes(self, incidente_id: str, fuentes: list[str]) -> None:
+        """Recuerda los fragmentos que devolvio el RAG: solo estos se pueden citar."""
+        inc = self.incidente(incidente_id)
+        for f in fuentes:
+            if f not in inc.fuentes_recuperadas:
+                inc.fuentes_recuperadas.append(f)
+        self._guardar(inc)
+
     def registrar_diagnostico(
-        self, incidente_id: str, causa: str, confianza: float, runbook_id: str
+        self,
+        incidente_id: str,
+        causa: str,
+        confianza: float,
+        runbook_id: str,
+        fuentes: list[str] | None = None,
     ) -> None:
         inc = self.incidente(incidente_id)
         categoria = self._categoria(inc)
+        citadas = list(fuentes or [])
+        for f in citadas:
+            if f not in inc.fuentes_recuperadas:
+                raise ErrorCiclo(f"fuente no recuperada: {f}")
         if not 0.0 <= confianza <= 1.0:
             raise ErrorCiclo("confianza debe estar entre 0 y 1")
         if runbook_id != categoria.runbook_id:
@@ -240,10 +257,16 @@ class Ciclo:
                 f"(corresponde {categoria.runbook_id})"
             )
         inc.causa, inc.confianza, inc.runbook_id = causa, confianza, runbook_id
+        inc.fuentes_citadas = citadas
         inc.estado = Estado.DIAGNOSTICADO
         self._guardar(inc)
         self.auditoria.registrar(
-            incidente_id, "diagnostico", causa=causa, confianza=confianza, runbook=runbook_id
+            incidente_id,
+            "diagnostico",
+            causa=causa,
+            confianza=confianza,
+            runbook=runbook_id,
+            fuentes=citadas,
         )
 
     def ejecutar_remediacion(self, incidente_id: str, *, aprobada: bool) -> ResultadoEjecucion:

@@ -98,6 +98,10 @@ class Incidente:
     # incluyen las internas del framework (task, write_todos...), no solo las del ciclo.
     turnos_llm: int = 0
     llamadas_tools: int = 0
+    # RAG (informativo): ids de fragmentos que las busquedas devolvieron y los que el
+    # diagnostico cito. El dominio rechaza citar lo que no se recupero.
+    fuentes_recuperadas: list[str] = field(default_factory=list)
+    fuentes_citadas: list[str] = field(default_factory=list)
 
     @property
     def intentos(self) -> int:

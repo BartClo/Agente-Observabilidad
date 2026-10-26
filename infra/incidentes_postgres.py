@@ -63,6 +63,8 @@ def _desde_dict(d: dict[str, Any]) -> Incidente:
         causa=d.get("causa"),
         confianza=d["confianza"],
         runbook_id=d.get("runbook_id"),
+        fuentes_recuperadas=d.get("fuentes_recuperadas", []),
+        fuentes_citadas=d.get("fuentes_citadas", []),
         acciones=acciones,
         verificado=d["verificado"],
         intervencion_humana=d["intervencion_humana"],

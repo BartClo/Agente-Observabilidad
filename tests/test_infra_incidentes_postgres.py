@@ -107,3 +107,20 @@ def test_filas_viejas_sin_ts_en_las_acciones_se_leen_con_none() -> None:
     assert _desde_dict(datos).acciones[0].ts == 42.0
     del datos["acciones"][0]["ts"]  # fila guardada antes de existir el campo
     assert _desde_dict(datos).acciones[0].ts is None
+
+
+def test_sobreviven_las_fuentes_del_rag(repo: RepositorioIncidentesPostgres) -> None:
+    env = EntornoSimulado()
+    alerta = env.inyectar_fallo("checkout", "servicio_detenido")
+    politica = Politica(nivel=NivelAutonomia.AUTONOMO_CON_ROLLBACK)
+    ciclo = Ciclo(env, env, politica, Auditoria(), repositorio=repo)
+    inc = ciclo.abrir(alerta.id)
+    ciclo.confirmar_anomalia(inc.id)
+    categoria, _, _ = ciclo.clasificar(inc.id)
+    assert categoria is not None
+    ciclo.registrar_fuentes(inc.id, ["C1", "C2"])
+    ciclo.registrar_diagnostico(inc.id, "causa", 0.9, categoria.runbook_id, fuentes=["C2"])
+    leido = repo.obtener(inc.id)
+    assert leido is not None
+    assert leido.fuentes_recuperadas == ["C1", "C2"]
+    assert leido.fuentes_citadas == ["C2"]

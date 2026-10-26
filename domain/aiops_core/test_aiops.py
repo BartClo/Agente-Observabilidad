@@ -946,3 +946,45 @@ def test_los_logs_se_acotan_a_la_ventana_alrededor_de_la_alerta(
         inc = ciclo.abrir_desde_alerta(alerta)
         ciclo.logs(inc.id, 5)
         assert pedidos[-1] == esperado, (ventana, disparada)
+
+
+# --- RAG: fuentes recuperadas y citadas ------------------------------------------------
+
+
+def _clasificado() -> tuple[Ciclo, str, str]:
+    ciclo, _, a = armar()
+    inc_id = ciclo.abrir(a).id
+    ciclo.confirmar_anomalia(inc_id)
+    categoria, _, _ = ciclo.clasificar(inc_id)
+    assert categoria is not None
+    return ciclo, inc_id, categoria.runbook_id
+
+
+def test_diagnostico_acepta_fuentes_recuperadas() -> None:
+    ciclo, inc_id, rb = _clasificado()
+    ciclo.registrar_fuentes(inc_id, ["C1", "C2"])
+    ciclo.registrar_diagnostico(inc_id, "causa", 0.9, rb, fuentes=["C1"])
+    inc = ciclo.incidente(inc_id)
+    assert inc.fuentes_recuperadas == ["C1", "C2"]
+    assert inc.fuentes_citadas == ["C1"]
+
+
+def test_diagnostico_rechaza_fuente_no_recuperada() -> None:
+    ciclo, inc_id, rb = _clasificado()
+    ciclo.registrar_fuentes(inc_id, ["C1"])
+    with pytest.raises(ErrorCiclo, match="fuente no recuperada: C999"):
+        ciclo.registrar_diagnostico(inc_id, "causa", 0.9, rb, fuentes=["C999"])
+    assert ciclo.incidente(inc_id).estado is not Estado.DIAGNOSTICADO
+
+
+def test_diagnostico_sin_fuentes_sigue_valido() -> None:
+    ciclo, inc_id, rb = _clasificado()
+    ciclo.registrar_diagnostico(inc_id, "causa", 0.9, rb)
+    assert ciclo.incidente(inc_id).fuentes_citadas == []
+
+
+def test_registrar_fuentes_no_duplica() -> None:
+    ciclo, inc_id, _ = _clasificado()
+    ciclo.registrar_fuentes(inc_id, ["C1", "C2"])
+    ciclo.registrar_fuentes(inc_id, ["C2", "C3"])
+    assert ciclo.incidente(inc_id).fuentes_recuperadas == ["C1", "C2", "C3"]
