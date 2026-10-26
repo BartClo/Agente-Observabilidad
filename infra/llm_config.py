@@ -228,6 +228,11 @@ def estado(database_url: str | None = None) -> dict[str, Any]:
     }
 
 
+def api_key(proveedor: str, database_url: str | None = None) -> str:
+    """API key descifrada de `proveedor`, para otros modulos de infra (embeddings)."""
+    return _credencial(proveedor, database_url)
+
+
 def _credencial(proveedor: str, database_url: str | None) -> str:
     with psycopg.connect(_url(database_url), autocommit=True) as conn:
         fila = conn.execute(

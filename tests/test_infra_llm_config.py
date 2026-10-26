@@ -172,3 +172,10 @@ def test_borrar_la_key_del_respaldo_lo_quita() -> None:
     llm_config.seleccionar_respaldo("google", "gemini-x", "admin")
     llm_config.borrar_api_key("google", "admin")
     assert llm_config.estado()["respaldo"] == {"proveedor": None, "modelo": None}
+
+
+def test_api_key_devuelve_la_key_descifrada() -> None:
+    llm_config.guardar_api_key("anthropic", KEY, "admin")
+    assert llm_config.api_key("anthropic") == KEY
+    with pytest.raises(ConfigLLMError, match="no hay API key"):
+        llm_config.api_key("openai")

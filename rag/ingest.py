@@ -16,8 +16,10 @@ def ingest_path(collection: str, path: Path, tenant_id: str = "default") -> int:
 
     Devuelve la cantidad de chunks guardados.
     """
-    files = [path] if path.is_file() else sorted(
-        p for p in path.rglob("*") if p.suffix in SUPPORTED_SUFFIXES
+    files = (
+        [path]
+        if path.is_file()
+        else sorted(p for p in path.rglob("*") if p.suffix in SUPPORTED_SUFFIXES)
     )
 
     total = 0
