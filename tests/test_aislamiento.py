@@ -33,3 +33,9 @@ def test_el_experimento_fija_la_configuracion_del_rag() -> None:
 def test_sin_rag_apaga_el_brazo(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(experimento, "RAG", "0")
     assert "AIOPS_RAG=0" in experimento._env_ciclo(3, "6443")  # noqa: SLF001
+
+
+def test_el_piso_del_experimento_es_el_calibrado() -> None:
+    from agents.aiops import conocimiento
+
+    assert experimento.CONFIG_RAG["AIOPS_RAG_MIN_SIM"] == conocimiento.MIN_SIM_DEFECTO

@@ -18,6 +18,10 @@ from rag.embeddings import embed_consulta
 from rag.types import Pasaje
 
 MAX_CONSULTA = 300
+# Calibrado con corpus/calibracion.json (python -m rag.cli calibrar, 2026-10-25): relevantes
+# 0,733-0,828, irrelevantes 0,541-0,636, piso = punto medio. Recalibrar si cambia el corpus o
+# el modelo de embeddings.
+MIN_SIM_DEFECTO = "0.69"
 PAUSA_S = 60.0
 SIN_RESULTADOS = "Sin conocimiento relevante para este servicio."
 NO_DISPONIBLE = "Conocimiento no disponible por ahora. Continua sin el."
@@ -58,7 +62,7 @@ def buscar_general(consulta: str) -> str:
             embed_consulta(consulta[:MAX_CONSULTA]),
             servicio=None,
             k=int(os.environ.get("AIOPS_RAG_K", "4")),
-            min_sim=float(os.environ.get("AIOPS_RAG_MIN_SIM", "0")),
+            min_sim=float(os.environ.get("AIOPS_RAG_MIN_SIM", MIN_SIM_DEFECTO)),
             origenes=_origenes(),
         )
     except Exception:  # el chat sigue respondiendo con sus otras tools
@@ -76,7 +80,7 @@ def buscar(ciclo: Ciclo, incidente_id: str, consulta: str) -> str:
             embed_consulta(consulta[:MAX_CONSULTA]),
             servicio=inc.alerta.servicio,
             k=int(os.environ.get("AIOPS_RAG_K", "4")),
-            min_sim=float(os.environ.get("AIOPS_RAG_MIN_SIM", "0")),
+            min_sim=float(os.environ.get("AIOPS_RAG_MIN_SIM", MIN_SIM_DEFECTO)),
             origenes=_origenes(),
             excluir_tipos=("runbook",),  # el runbook ya llega con clasificar_incidente
         )

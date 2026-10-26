@@ -214,9 +214,9 @@ AISLAMIENTO = {
     "AIOPS_RAG_ORIGENES": "repo",
 }
 
-# RAG durante el experimento. min_sim se fija tras calibrar (python -m rag.cli calibrar) y
-# queda en congelado.json. RAG="0" (--sin-rag) es el brazo de comparacion.
-CONFIG_RAG = {"AIOPS_RAG_K": "4", "AIOPS_RAG_MIN_SIM": "0"}
+# RAG durante el experimento. min_sim sale de la calibracion (python -m rag.cli calibrar;
+# debe coincidir con agents.aiops.conocimiento.MIN_SIM_DEFECTO) y queda en congelado.json. RAG="0" (--sin-rag) es el brazo de comparacion.
+CONFIG_RAG = {"AIOPS_RAG_K": "4", "AIOPS_RAG_MIN_SIM": "0.69"}
 RAG = "1"
 
 

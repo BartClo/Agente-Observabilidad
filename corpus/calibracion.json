@@ -1,0 +1,30 @@
+{
+  "nota": "Consultas etiquetadas a mano para calibrar AIOPS_RAG_MIN_SIM (python -m rag.cli calibrar). relevante=true: frases como las que escribiria quien atiende una alerta de ese servicio. relevante=false: ajenas al dominio (faciles) o de otro servicio/tema de la plataforma (dificiles).",
+  "consultas": [
+    {"q": "checkout no responde, up en 0", "servicio": "checkout", "relevante": true},
+    {"q": "checkout proceso terminado por falta de memoria", "servicio": "checkout", "relevante": true},
+    {"q": "checkout caido justo despues de un despliegue", "servicio": "checkout", "relevante": true},
+    {"q": "api pod NotReady, chequeo de salud fallando", "servicio": "api", "relevante": true},
+    {"q": "api sin pods listos aunque se recree el pod", "servicio": "api", "relevante": true},
+    {"q": "pod de api falla despues de cambiar la configuracion", "servicio": "api", "relevante": true},
+    {"q": "api NotReady por presion de memoria en el nodo", "servicio": "api", "relevante": true},
+    {"q": "consumidor de la cola worker desconectado del broker", "servicio": "worker", "relevante": true},
+    {"q": "cola worker sin consumidores, reiniciar el consumidor", "servicio": "worker", "relevante": true},
+    {"q": "worker reinicia y vuelve a caer con el mismo mensaje", "servicio": "worker", "relevante": true},
+    {"q": "cuando escalar un incidente a una persona de guardia", "servicio": "checkout", "relevante": true},
+    {"q": "objetivo de disponibilidad del servicio", "servicio": "api", "relevante": true},
+
+    {"q": "receta de paella valenciana", "servicio": "api", "relevante": false},
+    {"q": "resultados del campeonato de futbol", "servicio": "checkout", "relevante": false},
+    {"q": "como configurar la vpn de la oficina", "servicio": "worker", "relevante": false},
+    {"q": "horario de la cafeteria del edificio", "servicio": "api", "relevante": false},
+    {"q": "traduccion de contratos legales", "servicio": "checkout", "relevante": false},
+    {"q": "entrenar una red neuronal con gpu", "servicio": "worker", "relevante": false},
+    {"q": "politica de vacaciones del personal", "servicio": "api", "relevante": false},
+    {"q": "como cambiar el neumatico de un auto", "servicio": "checkout", "relevante": false},
+    {"q": "cuidados de las plantas de interior", "servicio": "worker", "relevante": false},
+    {"q": "conciliacion de pagos atrasada con el proveedor", "servicio": "worker", "relevante": false},
+    {"q": "renovar el certificado tls del dominio", "servicio": "checkout", "relevante": false},
+    {"q": "cierre contable de fin de mes", "servicio": "api", "relevante": false}
+  ]
+}

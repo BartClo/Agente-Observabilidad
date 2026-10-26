@@ -2,6 +2,7 @@
 
     python -m rag.cli indexar <archivo|carpeta> [--origen repo|subido] [--tipo TIPO]
     python -m rag.cli listar
+    python -m rag.cli calibrar [corpus/calibracion.json]
     python -m rag.cli borrar <id>
 
 `indexar` lee .md y .pdf; usa la key de Gemini cargada (cifrada) desde la UI.
@@ -42,6 +43,12 @@ def _cmd_indexar(args: argparse.Namespace) -> None:
         print(f"OK  {doc_id:>4}  {nombre}")
 
 
+def _cmd_calibrar(args: argparse.Namespace) -> None:
+    from rag import calibracion
+
+    print(calibracion.informe(Path(args.ruta)))
+
+
 def _cmd_listar(_: argparse.Namespace) -> None:
     for d in store.listar_documentos():
         print(f"{d['id']:>4}  {d['origen']:<6}  {d['tipo']:<12}  {d['nombre']}  {d['servicios']}")
@@ -61,6 +68,9 @@ def main() -> None:
     p_indexar.add_argument("--tipo", default="otro", help="tipo si el archivo no lo declara")
     p_indexar.set_defaults(func=_cmd_indexar)
     sub.add_parser("listar").set_defaults(func=_cmd_listar)
+    p_cal = sub.add_parser("calibrar")
+    p_cal.add_argument("ruta", nargs="?", default="corpus/calibracion.json")
+    p_cal.set_defaults(func=_cmd_calibrar)
     p_borrar = sub.add_parser("borrar")
     p_borrar.add_argument("id", type=int)
     p_borrar.set_defaults(func=_cmd_borrar)
