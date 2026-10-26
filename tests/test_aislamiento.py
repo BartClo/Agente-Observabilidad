@@ -21,3 +21,15 @@ def test_el_experimento_aisla_cada_corrida_de_la_anterior() -> None:
     flags = experimento._env_ciclo(3, "6443")  # noqa: SLF001
     assert "AIOPS_BREAKER_MAX=0" in flags  # las inyecciones repetidas no son recurrencia real
     assert "AIOPS_LOGS_VENTANA_S=60" in flags  # el agente ve los logs de ESTA falla
+
+
+def test_el_experimento_fija_la_configuracion_del_rag() -> None:
+    flags = experimento._env_ciclo(3, "6443")  # noqa: SLF001
+    assert "AIOPS_RAG_ORIGENES=repo" in flags  # los PDF subidos no entran en lo medido
+    assert "AIOPS_RAG=1" in flags and "AIOPS_RAG_K=4" in flags
+    assert any(f.startswith("AIOPS_RAG_MIN_SIM=") for f in flags)
+
+
+def test_sin_rag_apaga_el_brazo(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(experimento, "RAG", "0")
+    assert "AIOPS_RAG=0" in experimento._env_ciclo(3, "6443")  # noqa: SLF001

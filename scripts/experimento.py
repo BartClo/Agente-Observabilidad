@@ -100,6 +100,7 @@ COLUMNAS = [
     "fase",
     "nivel",
     "agente",
+    "rag",
     "via",
     "categoria_esperada",
     "alertname",
@@ -122,6 +123,9 @@ COLUMNAS = [
     "turnos_llm",
     "llamadas_tools",
     "modelo_llm",
+    "confianza",
+    "fuentes_recuperadas",
+    "fuentes_citadas",
     "motivo_escalamiento",
     "error",
 ]
@@ -202,7 +206,18 @@ def _k8s_sano() -> bool:
 # artificialmente. (2) Los logs FATAL de la corrida anterior le harian ver al agente
 # "reinicios que vuelven a caer". Se desactiva el primero y se acota el segundo a 60 s antes
 # de la alerta. Ambos se declaran en la tesis y quedan en resultados/congelado.json.
-AISLAMIENTO = {"AIOPS_BREAKER_MAX": "0", "AIOPS_LOGS_VENTANA_S": "60"}
+AISLAMIENTO = {
+    "AIOPS_BREAKER_MAX": "0",
+    "AIOPS_LOGS_VENTANA_S": "60",
+    # Los PDF que un administrador sube desde la UI no entran en lo medido: solo el corpus
+    # versionado y auditable (corpus/ + runbooks), cuyo hash queda en congelado.json.
+    "AIOPS_RAG_ORIGENES": "repo",
+}
+
+# RAG durante el experimento. min_sim se fija tras calibrar (python -m rag.cli calibrar) y
+# queda en congelado.json. RAG="0" (--sin-rag) es el brazo de comparacion.
+CONFIG_RAG = {"AIOPS_RAG_K": "4", "AIOPS_RAG_MIN_SIM": "0"}
+RAG = "1"
 
 
 def _env_ciclo(nivel: int, puerto: str) -> list[str]:
@@ -229,6 +244,8 @@ def _env_ciclo(nivel: int, puerto: str) -> list[str]:
         "PYTHONUNBUFFERED": "1",
         "AIOPS_AGENTE": os.environ.get("AIOPS_AGENTE", "unico"),
         **AISLAMIENTO,
+        **CONFIG_RAG,
+        "AIOPS_RAG": RAG,
     }
     return [a for k, v in env.items() for a in ("-e", f"{k}={v}")]
 
@@ -358,6 +375,11 @@ def worker_de_laboratorio(nivel: int, puerto: str) -> Iterator[None]:
         _sh(["docker", "compose", "start", "worker"])
 
 
+def _unir(ids: object) -> str:
+    """Lista de ids de fuentes (C12, C13) como una sola celda del CSV."""
+    return "|".join(str(i) for i in ids) if isinstance(ids, list) else ""
+
+
 def correr(
     cat: str,
     n: int,
@@ -376,6 +398,7 @@ def correr(
         fase=fase,
         nivel=nivel,
         agente=os.environ.get("AIOPS_AGENTE", "unico"),
+        rag=RAG,
         via=via,
         categoria_esperada=cat,
         alertname=esc.alertname,
@@ -466,6 +489,9 @@ def correr(
         turnos_llm=d.get("turnos_llm") or 0,
         llamadas_tools=d.get("llamadas_tools") or 0,
         modelo_llm=d.get("modelo_llm") or "",
+        confianza=d.get("confianza") if d.get("confianza") is not None else "",
+        fuentes_recuperadas=_unir(d.get("fuentes_recuperadas")),
+        fuentes_citadas=_unir(d.get("fuentes_citadas")),
         motivo_escalamiento=d.get("motivo_escalamiento") or "",
     )
     if via == "webhook":
@@ -542,7 +568,14 @@ def main() -> int:
         help="directo: invoca el ciclo (rapido, para ajustar). webhook: camino real, espera a "
         "que Grafana dispare la alerta y al worker (mide la deteccion; solo --modo llm)",
     )
+    p.add_argument(
+        "--sin-rag",
+        action="store_true",
+        help="brazo de comparacion: el agente no tiene buscar_conocimiento (AIOPS_RAG=0)",
+    )
     args = p.parse_args()
+    global RAG
+    RAG = "0" if args.sin_rag else "1"
     if args.fase == "final":
         exigir_congelado()
 

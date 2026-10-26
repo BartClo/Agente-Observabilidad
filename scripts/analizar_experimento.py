@@ -90,6 +90,32 @@ def resumen_deteccion(filas: Sequence[dict[str, str]]) -> str | None:
     )
 
 
+def _ids(valor: str | None) -> list[str]:
+    return [x for x in (valor or "").split("|") if x]
+
+
+def resumen_rag(filas: Sequence[dict[str, str]]) -> str | None:
+    """Brazo con RAG: cuantos diagnosticos citaron una fuente verificada, entre los que
+    recuperaron pasajes (si la busqueda no trajo nada no hay nada que citar). Confianza y
+    costo se reportan con su n, sin afirmar mejora: con pocas corridas la variabilidad de
+    la confianza (0,6 a 0,85 con la misma evidencia) supera cualquier diferencia."""
+    con_rag = [f for f in filas if f.get("rag") == "1"]
+    if not con_rag:
+        return None
+    recuperaron = [f for f in con_rag if _ids(f.get("fuentes_recuperadas"))]
+    citaron = [f for f in recuperaron if _ids(f.get("fuentes_citadas"))]
+    pct = 100 * len(citaron) / len(recuperaron) if recuperaron else 0.0
+    tokens = [int(f.get("tokens_entrada") or 0) + int(f.get("tokens_salida") or 0) for f in con_rag]
+    confianzas = [float(f["confianza"]) for f in con_rag if f.get("confianza")]
+    texto = (
+        f"RAG: citas verificadas en {len(citaron)} de {len(recuperaron)} diagnósticos que "
+        f"recuperaron pasajes ({pct:.0f} %) · tokens por incidente: mediana {median(tokens):.0f}"
+    )
+    if confianzas:
+        texto += f" · confianza: mediana {median(confianzas):.2f}"
+    return texto + f" (n = {len(con_rag)})"
+
+
 def main(argv: list[str]) -> int:
     p = argparse.ArgumentParser(description="Resume un experimento de la Fase 7.")
     p.add_argument("csv")
@@ -145,6 +171,9 @@ def main(argv: list[str]) -> int:
     deteccion = resumen_deteccion(filas)
     if deteccion:
         print(deteccion, "\n")
+    rag = resumen_rag(filas)
+    if rag:
+        print(rag, "\n")
     print("## Hipótesis\n")
     print(tabla_hipotesis(ev.contrastar(corridas, base)))
     return 0

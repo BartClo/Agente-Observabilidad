@@ -17,7 +17,7 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
-from scripts.experimento import AISLAMIENTO
+from scripts.experimento import AISLAMIENTO, CONFIG_RAG, RAG
 
 RAIZ = Path(__file__).resolve().parent.parent
 API = os.environ.get("EXP_API", "http://localhost:8010")
@@ -79,6 +79,14 @@ def construir_registro() -> dict[str, object]:
         "aislamiento_entre_corridas": dict(AISLAMIENTO),
         "prompt_sha256": _sha256(RAIZ / "agents" / "aiops" / "prompt.md"),
         "runbooks_sha256": _sha256(*(RAIZ / "agents" / "aiops" / "runbooks").glob("RB-*.md")),
+        # Base de conocimiento: el corpus versionado (lo unico que entra en lo medido), el
+        # modelo de embeddings y los parametros de busqueda. Cambiar un documento cambia el hash.
+        "rag": {
+            "activo": RAG,
+            "embedding_modelo": _env("AIOPS_EMBEDDING_MODEL", "gemini-embedding-001"),
+            "config": {**CONFIG_RAG, "AIOPS_RAG_ORIGENES": AISLAMIENTO["AIOPS_RAG_ORIGENES"]},
+            "corpus_sha256": _sha256(*(RAIZ / "corpus").glob("*.md")),
+        },
     }
 
 

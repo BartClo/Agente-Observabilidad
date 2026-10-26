@@ -88,3 +88,13 @@ def test_la_fase_final_exige_el_congelado_y_que_el_codigo_no_haya_cambiado(
     )
     with pytest.raises(SystemExit, match="sin commitear"):
         experimento.exigir_congelado()
+
+
+def test_el_registro_congela_el_rag_y_el_corpus(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(congelar, "_git", _git_falso())
+    monkeypatch.setattr(congelar, "_config_llm", lambda: CFG_OK)
+    rag = congelar.construir_registro()["rag"]
+    assert isinstance(rag, dict)
+    assert rag["activo"] == "1" and rag["embedding_modelo"] == "gemini-embedding-001"
+    assert len(str(rag["corpus_sha256"])) == 64
+    assert rag["config"]["AIOPS_RAG_ORIGENES"] == "repo"

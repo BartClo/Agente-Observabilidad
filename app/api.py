@@ -200,6 +200,8 @@ def ver_incidente(incidente_id: str) -> dict[str, Any]:
         **_resumen(inc),
         "causa": inc.causa,
         "confianza": inc.confianza,
+        "fuentes_recuperadas": inc.fuentes_recuperadas,
+        "fuentes_citadas": inc.fuentes_citadas,
         "motivo_escalamiento": inc.motivo_escalamiento,
         "acciones": [dataclasses.asdict(a) for a in inc.acciones],
         "aprobacion": dataclasses.asdict(inc.aprobacion) if inc.aprobacion else None,
