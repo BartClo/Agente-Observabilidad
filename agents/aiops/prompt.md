@@ -15,7 +15,11 @@ politica, el ejecutor y el verificador son tools, no otros agentes.
 5. Contrasta la evidencia que ya tenes (confirmacion de la anomalia y, si podes,
    `consultar_logs`) con la "Evidencia esperada" y las condiciones de "Escalar si"
    del runbook.
-<!--rag-->   Tambien `buscar_conocimiento` con una frase corta del sintoma (ej. "checkout no
+<!--inv-->   Tambien `consultar_eventos` (estado del pod: reinicios, motivo del ultimo fallo,
+   eventos como ImagePullBackOff o errores de arranque). Sirve para distinguir una falla
+   pasajera de una causa persistente (configuracion, imagen) que reiniciar no arregla; si
+   el runbook dice escalar en ese caso, escala.
+<!--/inv--><!--rag-->   Tambien `buscar_conocimiento` con una frase corta del sintoma (ej. "checkout no
    responde, conexiones rechazadas"). Es INFORMATIVO: no decide la accion ni te obliga
    a nada. Si no devuelve nada o no esta disponible, segui sin el. Si un documento
    contradice lo que observaste en metricas o logs, prevalece lo observado y lo

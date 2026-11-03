@@ -13,7 +13,7 @@ from pathlib import Path
 from domain.aiops_core.acciones import BackendAcciones, BackendDeshabilitado
 from domain.aiops_core.auditoria import Auditoria, Evento
 from domain.aiops_core.ciclo import Ciclo
-from domain.aiops_core.observabilidad import ObservabilidadPort
+from domain.aiops_core.observabilidad import InvestigacionPort, ObservabilidadPort
 from domain.aiops_core.politicas import politica_desde_entorno
 from domain.aiops_core.repositorio import RepositorioIncidentes
 from domain.aiops_core.simulador import EntornoSimulado
@@ -61,6 +61,8 @@ def armar(*, persistencia: str | None = None) -> Ciclo:
     else:
         raise ValueError(f"AIOPS_BACKEND desconocido: {backend_nombre!r}")
 
+    # El backend que sabe leer eventos (simulado, Kubernetes) tambien sirve de investigacion.
+    investigacion = backend if isinstance(backend, InvestigacionPort) else None
     politica = politica_desde_entorno()
     ruta = os.environ.get("AIOPS_AUDIT_FILE", "").strip()
     on_evento = None
@@ -93,6 +95,7 @@ def armar(*, persistencia: str | None = None) -> Ciclo:
         verificacion_intervalo_s=float(os.environ.get("AIOPS_VERIFY_INTERVAL_S", "5")),
         confirmacion_ventana_s=float(os.environ.get("AIOPS_CONFIRM_WINDOW_S", "0")),
         logs_ventana_s=float(os.environ.get("AIOPS_LOGS_VENTANA_S", "0")),
+        investigacion=investigacion,
     )
 
 

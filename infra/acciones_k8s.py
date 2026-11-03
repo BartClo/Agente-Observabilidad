@@ -25,6 +25,19 @@ from datetime import UTC, datetime
 from typing import Any
 
 
+def _contenedor(pod: str, c: dict[str, Any]) -> str:
+    partes = [f"contenedor {c.get('name', '?')} de {pod}: listo={c.get('ready')}"]
+    partes.append(f"reinicios={c.get('restartCount', 0)}")
+    for clave, rotulo in (("state", "ahora"), ("lastState", "antes")):
+        for tipo, det in (c.get(clave) or {}).items():
+            if tipo == "running":
+                continue
+            motivo = det.get("reason", "?")
+            extra = f" codigo={det['exitCode']}" if "exitCode" in det else ""
+            partes.append(f"{rotulo} {tipo} {motivo}{extra} {det.get('message', '')}".strip())
+    return "; ".join(partes)
+
+
 class BackendKubernetes:
     def __init__(
         self,
@@ -72,6 +85,36 @@ class BackendKubernetes:
             # 403 = el RBAC dijo que no: es informacion util para el escalamiento.
             msg = f"API de Kubernetes respondio {exc.code} en {metodo} {ruta}"
             raise RuntimeError(msg) from exc
+
+    def eventos(self, servicio: str, maximo: int = 15) -> list[str]:
+        """Solo lectura: estado de los contenedores de los pods `app=<servicio>` y los ultimos
+        eventos de esos pods. Namespace y selector salen de la configuracion y del incidente."""
+        selector = urllib.parse.urlencode({"labelSelector": f"{self._etiqueta}={servicio}"})
+        pods = self._pedir(
+            "GET", f"/api/v1/namespaces/{self._ns}/pods?{selector}", None, "application/json", 10
+        ).get("items", [])
+        if not pods:
+            return [f"sin pods {self._etiqueta}={servicio} en {self._ns}"]
+        lineas: list[str] = []
+        nombres = set()
+        for pod in pods:
+            nombre = pod["metadata"]["name"]
+            nombres.add(nombre)
+            estado = pod.get("status", {})
+            lineas.append(f"pod {nombre}: fase={estado.get('phase', '?')}")
+            lineas += [_contenedor(nombre, c) for c in estado.get("containerStatuses", [])]
+        campo = urllib.parse.urlencode({"fieldSelector": "involvedObject.kind=Pod"})
+        crudos = self._pedir(
+            "GET", f"/api/v1/namespaces/{self._ns}/events?{campo}", None, "application/json", 10
+        ).get("items", [])
+        propios = [e for e in crudos if e.get("involvedObject", {}).get("name") in nombres]
+        propios.sort(key=lambda e: e.get("lastTimestamp") or e.get("eventTime") or "")
+        for e in propios[-maximo:]:
+            lineas.append(
+                f"evento {e.get('type', '?')} {e.get('reason', '?')} "
+                f"x{e.get('count', 1)}: {e.get('message', '')}"
+            )
+        return lineas
 
     def ejecutar(self, accion: str, servicio: str, timeout_s: int) -> str:
         if accion == "recreate_pod":

@@ -10,6 +10,7 @@ tools:
   - tools:abrir_incidente
   - tools:confirmar_anomalia
   - tools:consultar_logs
+  - tools:consultar_eventos
   - tools:clasificar_incidente
   - tools:buscar_conocimiento
   - tools:registrar_diagnostico

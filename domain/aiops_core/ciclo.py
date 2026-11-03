@@ -24,7 +24,7 @@ from domain.aiops_core.modelos import (
     NivelAutonomia,
     Severidad,
 )
-from domain.aiops_core.observabilidad import ObservabilidadPort
+from domain.aiops_core.observabilidad import InvestigacionPort, ObservabilidadPort
 from domain.aiops_core.politicas import Politica, Veredicto
 from domain.aiops_core.repositorio import RepositorioIncidentes, RepositorioIncidentesMemoria
 from domain.aiops_core.saneamiento import sanear_linea
@@ -55,8 +55,10 @@ class Ciclo:
         dormir: Callable[[float], None] = time.sleep,
         confirmacion_ventana_s: float = 0.0,
         logs_ventana_s: float = 0.0,
+        investigacion: InvestigacionPort | None = None,
     ) -> None:
         self._obs = observabilidad
+        self._investigacion = investigacion
         self._backend = backend
         self.politica = politica
         self.auditoria = auditoria
@@ -116,6 +118,20 @@ class Ciclo:
             for linea in self._obs.logs(inc.alerta.servicio, max(1, min(lineas, 200)), desde)
         ]
         self.auditoria.registrar(incidente_id, "consulta_logs", lineas=len(salida))
+        return salida
+
+    def eventos(self, incidente_id: str, maximo: int = 15) -> list[str]:
+        """Estado y eventos del servicio del incidente (solo lectura). El servicio sale del
+        incidente, nunca del LLM; cada linea se sanea igual que los logs."""
+        inc = self.incidente(incidente_id)
+        if self._investigacion is None:
+            raise ErrorCiclo("La consulta de eventos no esta disponible en este entorno")
+        try:
+            crudo = self._investigacion.eventos(inc.alerta.servicio, max(1, min(maximo, 50)))
+        except (RuntimeError, OSError) as exc:
+            raise ErrorCiclo(f"No se pudieron consultar los eventos: {exc}") from exc
+        salida = [sanear_linea(linea) for linea in crudo]
+        self.auditoria.registrar(incidente_id, "consulta_eventos", lineas=len(salida))
         return salida
 
     # --- ciclo --------------------------------------------------------------------

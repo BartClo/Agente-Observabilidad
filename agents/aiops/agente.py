@@ -34,6 +34,13 @@ def _definicion(modelo: Any = None) -> Any:
         prompt = re.sub(r"<!--rag-->.*?<!--/rag-->", "", prompt, flags=re.DOTALL)
     else:
         prompt = prompt.replace("<!--rag-->", "").replace("<!--/rag-->", "")
+    if os.environ.get("AIOPS_INVESTIGACION", "1") == "0":
+        definicion["tools"] = [
+            t for t in definicion["tools"] if getattr(t, "__name__", "") != "consultar_eventos"
+        ]
+        prompt = re.sub(r"<!--inv-->.*?<!--/inv-->", "", prompt, flags=re.DOTALL)
+    else:
+        prompt = prompt.replace("<!--inv-->", "").replace("<!--/inv-->", "")
     definicion["system_prompt"] = prompt
     return definicion
 

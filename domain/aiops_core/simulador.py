@@ -77,6 +77,12 @@ class EntornoSimulado:
         estado = ", ".join(f"{k}={v:g}" for k, v in self._metricas.get(servicio, {}).items())
         return [f"{servicio}: estado simulado [{estado or 'sano'}]"][:lineas]
 
+    # --- InvestigacionPort ----------------------------------------------------------
+
+    def eventos(self, servicio: str, maximo: int) -> list[str]:
+        listo = self._metricas.get(servicio, {}).get("pod_ready", _SANO["pod_ready"])
+        return [f"pod {servicio}-sim: listo={'si' if listo else 'no'} (simulado)"][:maximo]
+
     # --- BackendAcciones ------------------------------------------------------------
 
     def ejecutar(self, accion: str, servicio: str, timeout_s: int) -> str:
