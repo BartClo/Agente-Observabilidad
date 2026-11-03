@@ -37,6 +37,7 @@ MAX_INTENTOS = 8
 _LEER_POR_SONDEO = 50  # ponytail: tickets vistos que siguen en la columna ocupan lugar; con
 #                        mas de 50 viejos sin mover, filtrar por fecha en la JQL.
 _CLAVE_PROXIMO = "aiops:jira:proximo"
+_FUNC_SONDEO = "agents.aiops.jira_poller.sondear"
 _TERMINALES = {"cerrado": "resuelto", "escalado": "escalado", "descartado": "escalado"}
 _PREFIJO = "INC-JIRA-"
 
@@ -86,16 +87,28 @@ def _agendar(segundos: float) -> None:
     from infra.queue import get_queue
 
     get_queue("aiops").enqueue_in(
-        timedelta(seconds=segundos), "agents.aiops.jira_poller.sondear", job_timeout=120
+        timedelta(seconds=segundos), "agents.aiops.jira_poller.sondear", job_timeout=600
     )
+
+
+def _hay_sondeo_agendado() -> bool:
+    from rq.job import Job
+    from rq.registry import ScheduledJobRegistry
+
+    from infra.queue import get_queue
+
+    cola = get_queue("aiops")
+    ids = ScheduledJobRegistry(queue=cola).get_job_ids()  # type: ignore[no-untyped-call]
+    jobs = Job.fetch_many(ids, connection=cola.connection)
+    return any(j is not None and j.func_name == _FUNC_SONDEO for j in jobs)
 
 
 # --- sondeo -----------------------------------------------------------------------------
 
 
 def programar(segundos: float | None = None) -> bool:
-    """Agenda el proximo sondeo si Jira esta activo. Uno solo a la vez: una clave en Redis
-    con TTL hace de candado (si el worker muere, vence y el arranque vuelve a agendar)."""
+    """Agenda el proximo sondeo si Jira esta activo y no hay otro agendado. Un candado corto
+    en Redis serializa a quienes llaman a la vez; el registro de RQ es la fuente de verdad."""
     if not habilitado():
         return False
     cfg = _cargar()
@@ -103,25 +116,22 @@ def programar(segundos: float | None = None) -> bool:
         return False
     from infra.redis_client import get_redis
 
-    espera = float(cfg.intervalo_s if segundos is None else segundos)
-    if not get_redis().set(_CLAVE_PROXIMO, "1", nx=True, ex=int(espera) + 120):
+    if not get_redis().set(_CLAVE_PROXIMO, "1", nx=True, ex=10):
         return False
-    _agendar(espera)
+    if _hay_sondeo_agendado():
+        return False
+    _agendar(float(cfg.intervalo_s if segundos is None else segundos))
     return True
 
 
 def sondear() -> dict[str, Any]:
-    """Job de RQ: un sondeo y, pase lo que pase, el siguiente."""
-    from infra.redis_client import get_redis
-
-    get_redis().delete(_CLAVE_PROXIMO)
+    """Job de RQ. Agenda el siguiente ANTES de trabajar: si este se mata por timeout, el
+    ciclo sigue."""
     try:
-        return _sondear()
-    finally:
-        try:
-            programar()
-        except Exception:
-            logger.exception("no se pudo agendar el proximo sondeo de Jira")
+        programar()
+    except Exception:
+        logger.exception("no se pudo agendar el proximo sondeo de Jira")
+    return _sondear()
 
 
 def _sondear() -> dict[str, Any]:
@@ -138,18 +148,31 @@ def _sondear() -> dict[str, Any]:
         _registrar_sondeo(0, str(exc))
         return {"error": str(exc), "comentados": comentados}
     nuevos: list[str] = []
+    error: str | None = None
     clasificador: jira_entrada.Clasificador | None = None
     for t in tickets:
         if len(nuevos) >= MAX_POR_SONDEO:
             break
         if not _tomar(t.clave):
             continue
-        if clasificador is None and not ({"servicio", "categoria"} <= _prefijos(t.etiquetas)):
-            clasificador = _clasificador()
-        _encolar(jira_entrada.alerta_desde_ticket(t, clasificador))
+        try:
+            if clasificador is None and not ({"servicio", "categoria"} <= _prefijos(t.etiquetas)):
+                clasificador = _clasificador()
+            _encolar(jira_entrada.alerta_desde_ticket(t, clasificador))
+        except Exception as exc:
+            logger.exception("no se pudo encolar el ticket %s (se reintenta)", t.clave)
+            error = f"{t.clave}: {exc}"[:300]
+            _soltar(t.clave)
+            continue
         nuevos.append(t.clave)
-    _registrar_sondeo(len(nuevos), None)
+    _registrar_sondeo(len(nuevos), error)
     return {"nuevos": nuevos, "comentados": comentados}
+
+
+def _soltar(clave: str) -> None:
+    """Deshace `_tomar` para que el proximo sondeo reintente el ticket."""
+    with psycopg.connect(_url(), autocommit=True) as conn:
+        conn.execute("DELETE FROM aiops_jira_tickets WHERE clave = %s", (clave,))
 
 
 def _prefijos(etiquetas: tuple[str, ...]) -> set[str]:

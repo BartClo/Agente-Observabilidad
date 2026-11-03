@@ -55,7 +55,7 @@ def _ticket(
 @pytest.fixture
 def entorno(monkeypatch: pytest.MonkeyPatch) -> Iterator[dict[str, Any]]:
     encoladas: list[Alerta] = []
-    estado: dict[str, Any] = {"jira": JiraFalso([]), "sondeos": [], "programados": []}
+    estado: dict[str, Any] = {"jira": JiraFalso([]), "sondeos": []}
     monkeypatch.setattr(jira_poller, "_cargar", lambda: CFG)
     monkeypatch.setattr(jira_poller, "_cliente", lambda cfg: estado["jira"])
     monkeypatch.setattr(jira_poller, "_clasificador", lambda: None)
@@ -181,7 +181,72 @@ def test_programar_deja_un_solo_sondeo_agendado(
     get_redis().delete(jira_poller._CLAVE_PROXIMO)
     agendados: list[float] = []
     monkeypatch.setattr(jira_poller, "_agendar", lambda s: agendados.append(s))
+    monkeypatch.setattr(jira_poller, "_hay_sondeo_agendado", lambda: False)
     assert jira_poller.programar(5) is True
-    assert jira_poller.programar(5) is False
+    assert jira_poller.programar(5) is False  # el candado corto
     assert agendados == [5]
     get_redis().delete(jira_poller._CLAVE_PROXIMO)
+
+
+def test_programar_no_agenda_si_ya_hay_uno_en_el_registro(
+    entorno: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from infra.redis_client import get_redis
+
+    get_redis().delete(jira_poller._CLAVE_PROXIMO)
+    monkeypatch.setattr(jira_poller, "_hay_sondeo_agendado", lambda: True)
+    monkeypatch.setattr(jira_poller, "_agendar", lambda s: pytest.fail("no debia agendar"))
+    assert jira_poller.programar(5) is False
+    get_redis().delete(jira_poller._CLAVE_PROXIMO)
+
+
+def test_sondear_agenda_el_siguiente_antes_de_trabajar(
+    entorno: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    orden: list[str] = []
+
+    def programar(segundos: float | None = None) -> bool:
+        orden.append("programar")
+        return True
+
+    def sondear() -> dict[str, Any]:
+        orden.append("sondear")
+        return {}
+
+    monkeypatch.setattr(jira_poller, "programar", programar)
+    monkeypatch.setattr(jira_poller, "_sondear", sondear)
+    jira_poller.sondear()
+    assert orden == ["programar", "sondear"]
+
+
+def test_programar_con_cola_real_ve_el_sondeo_ya_agendado(
+    entorno: dict[str, Any],
+) -> None:
+    from infra.queue import get_queue
+    from infra.redis_client import get_redis
+
+    get_queue("aiops").empty()  # type: ignore[no-untyped-call]
+    get_redis().delete(jira_poller._CLAVE_PROXIMO)
+    assert jira_poller.programar(300) is True
+    get_redis().delete(jira_poller._CLAVE_PROXIMO)  # vence el candado corto
+    assert jira_poller._hay_sondeo_agendado() is True
+    assert jira_poller.programar(300) is False
+    get_queue("aiops").empty()  # type: ignore[no-untyped-call]
+    get_redis().delete(jira_poller._CLAVE_PROXIMO)
+
+
+def test_ticket_cuyo_encolado_falla_se_reintenta_en_el_siguiente_sondeo(
+    entorno: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    entorno["jira"] = JiraFalso([_ticket(1)])
+    bueno = jira_poller._encolar
+
+    def falla(alerta: Alerta) -> bool:
+        raise RuntimeError("redis caido")
+
+    monkeypatch.setattr(jira_poller, "_encolar", falla)
+    assert jira_poller._sondear()["nuevos"] == []
+    assert _filas() == []
+    assert "redis caido" in entorno["sondeos"][-1][1]
+    monkeypatch.setattr(jira_poller, "_encolar", bueno)
+    assert jira_poller._sondear()["nuevos"] == ["OPS-1"]
