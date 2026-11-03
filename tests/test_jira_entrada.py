@@ -65,10 +65,12 @@ def test_resumen_saneado_y_acotado() -> None:
     assert "hunter2" not in a.resumen and len(a.resumen) <= 200 and a.resumen.startswith("OPS-1")
 
 
-def test_entorno_por_etiqueta_o_variable(monkeypatch: pytest.MonkeyPatch) -> None:
-    assert alerta_desde_ticket(_t(("entorno:dev",))).entorno == "dev"
+def test_entorno_solo_de_la_configuracion(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("AIOPS_JIRA_ENTORNO", raising=False)
+    assert alerta_desde_ticket(_t()).entorno == "staging"
     monkeypatch.setenv("AIOPS_JIRA_ENTORNO", "prod")
-    assert alerta_desde_ticket(_t()).entorno == "prod"  # la politica decide si se puede actuar
+    # una etiqueta del ticket no puede rebajar el entorno que fijo el admin
+    assert alerta_desde_ticket(_t(("entorno:dev",))).entorno == "prod"
 
 
 def test_llm_que_falla_no_rompe() -> None:

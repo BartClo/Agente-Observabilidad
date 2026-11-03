@@ -149,3 +149,22 @@ def test_el_barrido_de_colgados_nunca_impide_atender_la_alerta(
     monkeypatch.setenv("AIOPS_RECONCILIAR_EDAD_S", "42")
     assert reconciliar_colgados(CicloOk()) == ["INC-1"]  # type: ignore[arg-type]
     assert CicloOk.visto == 42.0
+
+
+def test_job_de_jira_con_jira_apagado_se_descarta(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AIOPS_JIRA", "0")
+
+    def no_debe_armar(**_: Any) -> None:
+        raise AssertionError("no debe armar el ciclo")
+
+    monkeypatch.setattr("agents.aiops.runtime.armar", no_debe_armar)
+    a = Alerta(
+        id="JIRA-OPS-1",
+        nombre="x",
+        servicio="s",
+        entorno="staging",
+        severidad=Severidad.MEDIA,
+        resumen="r",
+        disparada_en=1.0,
+    )
+    assert "descartado" in procesar_alerta_webhook(dataclasses.asdict(a), True)

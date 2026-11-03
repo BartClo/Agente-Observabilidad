@@ -78,6 +78,10 @@ def procesar_alerta_webhook(alerta_dict: dict[str, Any], es_firing: bool) -> str
     Arma su propio Ciclo con `persistencia="postgres"` explicito, sin pisar el entorno
     del proceso (ver runtime.armar)."""
     alerta = _alerta_desde_dict(alerta_dict)
+    from agents.aiops import jira_poller
+
+    if alerta.id.startswith("JIRA-") and not jira_poller.habilitado():
+        return f"{alerta.id}: Jira desactivado, job descartado"
     ciclo = runtime.armar(persistencia="postgres")
     reconciliar_colgados(ciclo)
     if not es_firing:
