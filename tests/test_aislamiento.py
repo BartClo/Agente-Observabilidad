@@ -40,3 +40,7 @@ def test_el_piso_del_experimento_es_el_calibrado() -> None:
 
     assert experimento.CONFIG_RAG["AIOPS_RAG_MIN_SIM"] == conocimiento.MIN_SIM_DEFECTO
     assert experimento.CONFIG_RAG["AIOPS_RAG_K"] == conocimiento.K_DEFECTO
+
+
+def test_el_experimento_no_escucha_jira() -> None:
+    assert experimento.AISLAMIENTO["AIOPS_JIRA"] == "0"  # las corridas medidas no escuchan Jira

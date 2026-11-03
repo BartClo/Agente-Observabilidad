@@ -80,9 +80,11 @@ def armar(*, persistencia: str | None = None) -> Ciclo:
         repositorio = RepositorioIncidentesPostgres()
         # Postgres primero (la auditoria es la fuente de verdad); despues los avisos a
         # Google Chat, que si no hay webhook configurado no existen (sink None).
-        from agents.aiops import notificaciones
+        from agents.aiops import jira_poller, notificaciones
 
-        on_evento = notificaciones.componer(crear_sink_postgres(), notificaciones.crear_sink())
+        on_evento = notificaciones.componer(
+            crear_sink_postgres(), notificaciones.crear_sink(), jira_poller.crear_sink()
+        )
         politica = dataclasses.replace(politica, kill_switch=kill_switch_postgres())
     auditoria = Auditoria(Path(ruta) if ruta else None, on_evento=on_evento)
     return Ciclo(

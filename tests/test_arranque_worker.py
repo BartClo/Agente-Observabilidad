@@ -40,3 +40,36 @@ def test_el_compose_reconcilia_antes_de_levantar_el_worker() -> None:
     assert comando.index("agents.aiops.arranque") < comando.index("rq worker")
     assert "--with-scheduler" in comando
     assert "exec" in comando  # rq queda como proceso principal: recibe las senales
+
+
+def test_arranque_agenda_el_sondeo_de_jira(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from agents.aiops import jira_poller
+
+    agendado: list[float | None] = []
+    monkeypatch.setattr(arranque, "_ciclo", lambda: object())
+    monkeypatch.setattr(worker_jobs, "reconciliar_colgados", lambda c: [])
+
+    def agenda(s: float | None = None) -> bool:
+        agendado.append(s)
+        return True
+
+    monkeypatch.setattr(jira_poller, "programar", agenda)
+    assert arranque.main() == 0
+    assert agendado == [5] and "jira: sondeo agendado" in capsys.readouterr().out
+
+
+def test_jira_que_falla_no_impide_arrancar(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from agents.aiops import jira_poller
+
+    def cae(s: float | None = None) -> bool:
+        raise RuntimeError("redis caido")
+
+    monkeypatch.setattr(arranque, "_ciclo", lambda: object())
+    monkeypatch.setattr(worker_jobs, "reconciliar_colgados", lambda c: [])
+    monkeypatch.setattr(jira_poller, "programar", cae)
+    assert arranque.main() == 0
+    assert "jira: no se pudo agendar" in capsys.readouterr().out

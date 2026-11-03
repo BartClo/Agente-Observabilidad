@@ -212,6 +212,8 @@ AISLAMIENTO = {
     # Los PDF que un administrador sube desde la UI no entran en lo medido: solo el corpus
     # versionado y auditable (corpus/ + runbooks), cuyo hash queda en congelado.json.
     "AIOPS_RAG_ORIGENES": "repo",
+    # Los tickets de Jira no entran en lo medido: el poller no corre en las corridas.
+    "AIOPS_JIRA": "0",
 }
 
 # RAG durante el experimento. min_sim sale de la calibracion (python -m rag.cli calibrar;
