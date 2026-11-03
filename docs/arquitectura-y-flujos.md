@@ -116,6 +116,7 @@ orquestador sigue disponible como brazo de comparación (`AIOPS_AGENTE=deepagent
 | Entrada | `abrir_incidente` | Crea el incidente desde una alerta | `abierto` |
 | Detección | `confirmar_anomalia` | Contrasta la alerta con la señal sana de su categoría | `confirmado` |
 | Contexto | `consultar_logs` | Logs del servicio, **saneados** (secretos enmascarados, 300 car/línea) | no |
+| Contexto | `consultar_eventos` | Fase, reinicios, motivo del último fallo y eventos de los pods del servicio (Kubernetes, solo lectura, **saneado y delimitado**) | no |
 | Clasificación | `clasificar_incidente` | Categoría L1, elegibilidad y **texto del runbook** por id | `clasificado` |
 | Conocimiento | `buscar_conocimiento` | Pasajes del servicio del incidente (RAG), informativos | no |
 | Diagnóstico | `registrar_diagnostico` | Causa, confianza, runbook y **fuentes citadas** (verificadas) | `diagnosticado` |

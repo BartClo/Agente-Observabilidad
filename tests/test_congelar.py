@@ -34,6 +34,7 @@ def test_registro_con_todo_lo_que_hace_reproducible_la_corrida(
     assert registro["commit"] == "abc123" and registro["modelo"] == "deepseek:deepseek-chat"
     assert registro["agente"] == "unico" and len(str(registro["prompt_sha256"])) == 64
     assert len(str(registro["runbooks_sha256"])) == 64
+    assert registro["investigacion"] == "1"
 
 
 @pytest.mark.parametrize(

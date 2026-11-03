@@ -516,3 +516,30 @@ de fragmento o el modelo de embeddings.
 - Respaldo de LLM verificado en vivo: modelo principal inexistente → `BadRequestError` →
   evento `llm_respaldo` → Gemini retomó el mismo incidente. (El modelo barato lo escaló; eso no
   es del mecanismo.) Configuración restaurada: activo `deepseek-chat`, sin respaldo.
+
+
+## D21. `consultar_eventos`: el agente puede ver el estado del pod (solo lectura)
+
+**Problema.** En `pod_fallido` el agente solo veía métricas y logs. No podía distinguir una
+falla pasajera de una causa persistente (ConfigMap erróneo, imagen inexistente) y, con el RAG,
+dudaba (confianza 0,45) sin poder descartar el postmortem parecido. La tesis (§6.2) ya
+condicionaba la variante «imagen inexistente» a que existiera esta herramienta.
+
+**Decisión.** Tool `consultar_eventos(incidente_id)`:
+- Puerto `InvestigacionPort` en el dominio (opcional); `Ciclo.eventos` toma el servicio del
+  incidente (el LLM no elige objeto ni namespace), tope de 50, sanea cada línea con
+  `sanear_linea`, audita `consulta_eventos` y convierte una falla del clúster en `ErrorCiclo`
+  (el agente la lee y escala; no corta el ciclo).
+- `BackendKubernetes.eventos`: `GET` de pods `app=<servicio>` y de `events` del namespace, filtrados
+  a esos pods. Solo verbos de lectura.
+- RBAC: se agrega **únicamente** `events: list` (`pods: list` ya existía). Sin `get` de
+  secretos, sin `exec`.
+- Resultado delimitado con `<<< >>>` (dato observado, no instrucciones). Interruptor
+  `AIOPS_INVESTIGACION=0` quita tool y prompt; `congelar` registra su valor.
+
+**Verificación en vivo (sin LLM).** Pod sano: fase `Running`, reinicios 0, eventos `Scheduled`.
+Con una imagen inexistente: `ErrImagePull` / `ImagePullBackOff` con el motivo y los eventos
+`Failed`/`BackOff`; el Deployment se restauró con `rollout undo`.
+
+**No resuelto.** Falta medir si mejora la TRA o la abstención en las variantes confusoras con el
+modelo congelado; cambia el agente medido, así que se valida en vivo antes de congelar.

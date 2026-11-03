@@ -75,6 +75,8 @@ def construir_registro() -> dict[str, object]:
         "modelo": f"{activo['proveedor']}:{activo['modelo']}",
         "agente": os.environ.get("AIOPS_AGENTE", "unico"),
         "umbral_confianza": _env("AIOPS_CONFIDENCE_THRESHOLD", "0.8"),
+        # consultar_eventos (estado y eventos del pod): "0" la quita, brazo sin investigacion
+        "investigacion": _env("AIOPS_INVESTIGACION", "1"),
         # lo que el experimento fija en cada corrida (ver experimento.AISLAMIENTO)
         "aislamiento_entre_corridas": dict(AISLAMIENTO),
         "prompt_sha256": _sha256(RAIZ / "agents" / "aiops" / "prompt.md"),
