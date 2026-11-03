@@ -54,10 +54,13 @@ El LLM nunca elige la acción: la sigue fijando el catálogo.
   `estado_escalado`, `intervalo_s` (≥ 30, por defecto 60), `activo`, `actualizado_por`,
   `actualizado_en`, `ultimo_sondeo_en`, `ultimo_sondeo_tickets`, `ultimo_error`.
 - `aiops_jira_tickets`: `clave` (PK), `incidente_id`, `visto_en`, `estado`
-  (`encolado|comentado|error`). Cada ticket se procesa **una sola vez**.
-- Escritura de vuelta por la bandeja de salida existente con canal `jira` y reintentos. El
-  comentario sale de una plantilla sobre la auditoría (causa, acción, verificación, estado),
-  no del LLM.
+  (`encolado|pendiente|comentado|fallido`), `destino`, `texto`, `intentos`, `ultimo_error`.
+  Cada ticket se procesa **una sola vez**, y la misma tabla es la bandeja de escritura: al
+  cerrar/escalar/descartar el incidente queda `pendiente` y se entrega con reintentos (la
+  bandeja de Google Chat está atada a ese canal). Un comentario ya publicado no se repite si
+  después falla la transición: el error queda registrado.
+- El comentario sale de una plantilla sobre el incidente y la auditoría (causa, confianza,
+  acciones, motivo, estado), no del LLM.
 
 ## 6. Front y API
 
@@ -68,9 +71,11 @@ Pestaña "Jira" en la UI embebida en Grafana, solo administrador:
 3. Columna de entrada, estado si se resolvió, estado si se escaló.
 4. Intervalo, **Activar/Pausar**, último sondeo y tickets tomados.
 
-Endpoints (token de administración): `GET /config/jira`, `PUT /config/jira`,
+Endpoints (token de administración): `GET /config/jira`, `PUT /config/jira/conexion`,
 `POST /config/jira/probar`, `GET /config/jira/tableros`,
-`GET /config/jira/tableros/{id}/columnas`.
+`GET /config/jira/tableros/{id}/columnas`, `PUT /config/jira/tablero`,
+`PUT /config/jira/activo`. El cliente manda **nombres** de columna; el servidor vuelve a leer
+el tablero en Jira y resuelve los estados (no confía en ids enviados por el navegador).
 
 ## 7. Seguridad
 
