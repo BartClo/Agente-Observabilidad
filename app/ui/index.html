@@ -385,6 +385,9 @@ $("llm-probar").addEventListener("click", async () => {
   $("estado").textContent = "Probando…";
   try {
     const r = await admin("/config/llm/probar", { method: "POST", body: JSON.stringify({ proveedor: $("llm-prov").value, modelo: $("llm-modelo").value.trim() }) });
+    $("estado").textContent = (r.ok ? "OK: " : "Falló: ") + r.detalle;
+  } catch (e) { $("estado").textContent = "Error: " + e.message; }
+});
 
 // --- Jira. Usa el token admin (solo en memoria); el token de Jira nunca vuelve de la API.
 function pintarJira(cfg) {
@@ -401,8 +404,8 @@ function pintarJira(cfg) {
   if (cfg.intervalo_s) $("jira-intervalo").value = cfg.intervalo_s;
 }
 
-async function accionJira(ruta, opciones) {
-  try { pintarJira(await admin(ruta, opciones)); $("estado").textContent = "Configuración de Jira guardada."; }
+async function accionJira(ruta, pedido) {
+  try { pintarJira(await admin(ruta, pedido)); $("estado").textContent = "Configuración de Jira guardada."; }
   catch (e) { $("estado").textContent = "Error: " + e.message; }
 }
 
@@ -450,9 +453,6 @@ $("jira-tablero-guardar").addEventListener("click", () => usuarioActual() && acc
 $("jira-activar").addEventListener("click", () => usuarioActual() && accionJira("/config/jira/activo", {
   method: "PUT", body: JSON.stringify({ activo: !$("jira-activar").dataset.activo, usuario: usuarioActual() }),
 }));
-    $("estado").textContent = (r.ok ? "OK: " : "Falló: ") + r.detalle;
-  } catch (e) { $("estado").textContent = "Error: " + e.message; }
-});
 
 // --- Chat (solo lectura) y avisos de lo que hizo el agente.
 const nuevaConversacion = () => { const id = crypto.randomUUID(); guardar("aiops-chat", id); return id; };

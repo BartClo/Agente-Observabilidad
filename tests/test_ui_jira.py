@@ -34,3 +34,11 @@ def test_seccion_jira_con_campos_y_endpoints() -> None:
 
 def test_el_token_de_jira_no_se_guarda_en_el_navegador() -> None:
     assert 'guardar("jira' not in HTML and "localStorage" not in HTML
+
+
+def test_el_script_de_jira_esta_a_nivel_superior_fuera_del_listener_del_llm() -> None:
+    inicio = HTML.index('$("llm-probar").addEventListener')
+    fin = HTML.index("});", HTML.index("r.ok", inicio))
+    assert HTML.index('$("jira-guardar").addEventListener') > fin
+    ok = HTML.index("r.ok", inicio)
+    assert inicio < HTML.index("/config/llm/probar") < ok < HTML.index("// --- Jira")
