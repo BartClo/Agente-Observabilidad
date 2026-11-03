@@ -144,6 +144,33 @@
     </div>
   </section>
 
+  <section class="panel" aria-labelledby="jira-titulo">
+    <h2 id="jira-titulo">Jira · tickets como fuente de incidentes</h2>
+    <p class="sub">Usa el token admin de arriba. El agente escucha la columna de entrada del tablero,
+      confirma con telemetría y comenta el resultado en el ticket.</p>
+    <div class="barra">
+      <label>Sitio <input id="jira-sitio" size="26" placeholder="https://empresa.atlassian.net" spellcheck="false"></label>
+      <label>Correo <input id="jira-correo" size="20" spellcheck="false"></label>
+      <label>API token <input id="jira-token" type="password" autocomplete="off" size="16" placeholder="vacío = conservar"></label>
+      <button id="jira-guardar">Guardar conexión</button>
+      <button id="jira-probar">Probar conexión</button>
+      <span id="jira-sufijo" class="mono"></span>
+    </div>
+    <div class="barra" style="margin-top:8px">
+      <button id="jira-cargar">Cargar tableros</button>
+      <label>Tablero <select id="jira-tablero"></select></label>
+      <label>Entrada <select id="jira-entrada"></select></label>
+      <label>Si se resolvió <select id="jira-resuelto"></select></label>
+      <label>Si se escaló <select id="jira-escalado"></select></label>
+      <label>Cada <input id="jira-intervalo" type="number" min="30" value="60" style="width:5em"> s</label>
+      <button id="jira-tablero-guardar" class="primario">Guardar tablero</button>
+    </div>
+    <div class="barra" style="margin-top:8px">
+      <button id="jira-activar">Activar escucha</button>
+      <span id="jira-estado" class="mono"></span>
+    </div>
+  </section>
+
   <section class="panel" id="detalle" hidden>
     <h2 id="detalle-titulo">Línea de tiempo</h2>
     <p id="detalle-resumen" class="mono"></p>
@@ -358,6 +385,71 @@ $("llm-probar").addEventListener("click", async () => {
   $("estado").textContent = "Probando…";
   try {
     const r = await admin("/config/llm/probar", { method: "POST", body: JSON.stringify({ proveedor: $("llm-prov").value, modelo: $("llm-modelo").value.trim() }) });
+
+// --- Jira. Usa el token admin (solo en memoria); el token de Jira nunca vuelve de la API.
+function pintarJira(cfg) {
+  if (cfg.sitio) $("jira-sitio").value = cfg.sitio;
+  if (cfg.correo) $("jira-correo").value = cfg.correo;
+  $("jira-token").value = "";
+  $("jira-sufijo").textContent = cfg.configurada ? `token ••••${cfg.sufijo}` : "sin token";
+  const sondeo = cfg.ultimo_sondeo_en ? ` · último sondeo ${new Date(cfg.ultimo_sondeo_en).toLocaleTimeString()}, ${cfg.ultimo_sondeo_tickets} tickets` : "";
+  const error = cfg.ultimo_error ? ` · error: ${cfg.ultimo_error}` : "";
+  const tablero = cfg.tablero_nombre ? `${cfg.tablero_nombre} (${cfg.entrada})` : "sin tablero";
+  $("jira-estado").textContent = `${cfg.activo ? "Escuchando" : "En pausa"} · ${tablero}${sondeo}${error}`;
+  $("jira-activar").textContent = cfg.activo ? "Pausar escucha" : "Activar escucha";
+  $("jira-activar").dataset.activo = cfg.activo ? "1" : "";
+  if (cfg.intervalo_s) $("jira-intervalo").value = cfg.intervalo_s;
+}
+
+async function accionJira(ruta, opciones) {
+  try { pintarJira(await admin(ruta, opciones)); $("estado").textContent = "Configuración de Jira guardada."; }
+  catch (e) { $("estado").textContent = "Error: " + e.message; }
+}
+
+function opciones(sel, items, conVacio) {
+  sel.replaceChildren();
+  if (conVacio) { const o = el("option", "(no mover)"); o.value = ""; sel.append(o); }
+  for (const [valor, texto] of items) { const o = el("option", texto); o.value = valor; sel.append(o); }
+}
+
+async function cargarColumnas() {
+  const id = $("jira-tablero").value;
+  if (!id) return;
+  const cols = (await admin(`/config/jira/tableros/${id}/columnas`)).map((c) => [c.nombre, c.nombre]);
+  opciones($("jira-entrada"), cols, false);
+  opciones($("jira-resuelto"), cols, true);
+  opciones($("jira-escalado"), cols, true);
+}
+
+$("jira-guardar").addEventListener("click", () => usuarioActual() && accionJira("/config/jira/conexion", {
+  method: "PUT",
+  body: JSON.stringify({ sitio: $("jira-sitio").value.trim(), correo: $("jira-correo").value.trim(),
+                         token: $("jira-token").value, usuario: usuarioActual() }),
+}));
+$("jira-probar").addEventListener("click", async () => {
+  $("estado").textContent = "Probando Jira…";
+  try { const r = await admin("/config/jira/probar", { method: "POST" }); $("estado").textContent = (r.ok ? "OK: " : "Falló: ") + r.detalle; }
+  catch (e) { $("estado").textContent = "Error: " + e.message; }
+});
+$("jira-cargar").addEventListener("click", async () => {
+  try {
+    pintarJira(await admin("/config/jira"));
+    opciones($("jira-tablero"), (await admin("/config/jira/tableros")).map((t) => [t.id, t.nombre]), false);
+    await cargarColumnas();
+  } catch (e) { $("estado").textContent = "Error: " + e.message; }
+});
+$("jira-tablero").addEventListener("change", () => cargarColumnas().catch((e) => { $("estado").textContent = "Error: " + e.message; }));
+$("jira-tablero-guardar").addEventListener("click", () => usuarioActual() && accionJira("/config/jira/tablero", {
+  method: "PUT",
+  body: JSON.stringify({
+    tablero_id: Number($("jira-tablero").value), entrada: $("jira-entrada").value,
+    resuelto: $("jira-resuelto").value || null, escalado: $("jira-escalado").value || null,
+    intervalo_s: Number($("jira-intervalo").value), usuario: usuarioActual(),
+  }),
+}));
+$("jira-activar").addEventListener("click", () => usuarioActual() && accionJira("/config/jira/activo", {
+  method: "PUT", body: JSON.stringify({ activo: !$("jira-activar").dataset.activo, usuario: usuarioActual() }),
+}));
     $("estado").textContent = (r.ok ? "OK: " : "Falló: ") + r.detalle;
   } catch (e) { $("estado").textContent = "Error: " + e.message; }
 });
