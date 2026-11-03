@@ -122,41 +122,14 @@ def webhook_grafana(payload: dict[str, Any]) -> dict[str, Any]:
     agente inline (ver agents/aiops/worker_jobs.py, que corre en el servicio `worker`,
     profile `redis`). Dedupe por job_id = alerta.id (que ya incluye fingerprint/startsAt,
     distinto por cada disparo real: ver infra/alertas_webhook.py)."""
-    import dataclasses as dc
-    import re
-
-    from rq import Retry
-
-    from infra.queue import get_queue
+    from agents.aiops.worker_jobs import encolar_alerta
 
     etiqueta = os.environ.get("AIOPS_SERVICE_LABEL", "service")
-    cola = get_queue("aiops")
     encolados: list[str] = []
     deduplicados: list[str] = []
     for item in payload.get("alerts", []):
         alerta, es_firing = alerta_desde_grafana(item, etiqueta)
-        # RQ solo acepta [A-Za-z0-9_-] en job_id; alerta.id trae ":" (separador de
-        # infra/alertas_webhook.py). No afecta el dedupe: sigue siendo 1 a 1 con
-        # alerta.id, solo cambia el caracter separador.
-        job_id = "aiops-webhook-" + re.sub(r"[^A-Za-z0-9_-]", "_", alerta.id)
-        job = cola.fetch_job(job_id)
-        if job is not None and job.get_status() in ("queued", "started", "deferred", "scheduled"):
-            deduplicados.append(alerta.id)
-            continue
-        cola.enqueue(
-            "agents.aiops.worker_jobs.procesar_alerta_webhook",
-            dc.asdict(alerta),
-            es_firing,
-            job_id=job_id,
-            # Fase 6: un job colgado (LLM sin responder) no bloquea al worker para
-            # siempre; uno que falla (servicio ocupado, red) se reintenta con espera
-            # creciente; agotados los reintentos queda en el FailedJobRegistry de RQ
-            # (cola de fallidos) por AIOPS_JOB_FALLIDOS_TTL_S para revisarlo.
-            job_timeout=int(os.environ.get("AIOPS_JOB_TIMEOUT_S", "900")),
-            retry=Retry(max=int(os.environ.get("AIOPS_JOB_REINTENTOS", "2")), interval=[30, 120]),
-            failure_ttl=int(os.environ.get("AIOPS_JOB_FALLIDOS_TTL_S", str(7 * 86400))),
-        )
-        encolados.append(alerta.id)
+        (encolados if encolar_alerta(alerta, es_firing) else deduplicados).append(alerta.id)
     return {"encolados": encolados, "deduplicados": deduplicados}
 
 

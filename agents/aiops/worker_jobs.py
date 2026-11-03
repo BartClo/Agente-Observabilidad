@@ -90,6 +90,37 @@ def procesar_alerta_webhook(alerta_dict: dict[str, Any], es_firing: bool) -> str
     return f"{inc.id} procesado por el agente"
 
 
+def encolar_alerta(alerta: Alerta, es_firing: bool) -> bool:
+    """Encola la alerta para `procesar_alerta_webhook`. La usan el webhook de Grafana y el
+    poller de Jira: mismo dedupe (job_id = alerta.id), timeout, reintentos y cola de fallidos.
+    False si ya habia un job en curso para esa alerta."""
+    import dataclasses
+    import re
+
+    from rq import Retry
+
+    from infra.queue import get_queue
+
+    cola = get_queue("aiops")
+    # RQ solo acepta [A-Za-z0-9_-] en job_id; alerta.id trae ":" (infra/alertas_webhook.py).
+    job_id = "aiops-webhook-" + re.sub(r"[^A-Za-z0-9_-]", "_", alerta.id)
+    job = cola.fetch_job(job_id)
+    if job is not None and job.get_status() in ("queued", "started", "deferred", "scheduled"):
+        return False
+    cola.enqueue(
+        "agents.aiops.worker_jobs.procesar_alerta_webhook",
+        dataclasses.asdict(alerta),
+        es_firing,
+        job_id=job_id,
+        # Fase 6: un job colgado no bloquea al worker; uno que falla se reintenta con espera
+        # creciente; agotados los reintentos queda en el FailedJobRegistry de RQ.
+        job_timeout=int(os.environ.get("AIOPS_JOB_TIMEOUT_S", "900")),
+        retry=Retry(max=int(os.environ.get("AIOPS_JOB_REINTENTOS", "2")), interval=[30, 120]),
+        failure_ttl=int(os.environ.get("AIOPS_JOB_FALLIDOS_TTL_S", str(7 * 86400))),
+    )
+    return True
+
+
 def reconciliar_colgados(ciclo: Ciclo) -> list[str]:
     """Barrido de incidentes que quedaron a medias (agente caido o colgado), al inicio de
     cada job. Best-effort: un fallo aca nunca impide atender la alerta nueva.
