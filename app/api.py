@@ -434,6 +434,116 @@ def probar_llm(body: dict[str, Any]) -> dict[str, Any]:
     return {"ok": ok, "detalle": detalle}
 
 
+# --- Jira Cloud como fuente de incidentes (infra/jira_config.py, agents/aiops/jira_poller.py)
+
+
+def _config_jira(fn: Any, *args: Any) -> Any:
+    from infra.jira import ErrorJira
+    from infra.jira_config import ConfigJiraError
+
+    try:
+        return fn(*args)
+    except ConfigJiraError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    except ErrorJira as exc:
+        raise HTTPException(502, str(exc)) from exc
+
+
+def _cliente_jira() -> Any:
+    from infra import jira_config
+    from infra.jira import ClienteJira
+
+    return ClienteJira(*jira_config.credenciales())
+
+
+@app.get("/config/jira", dependencies=_ADMIN)
+def ver_config_jira() -> dict[str, Any]:
+    """Estado de la conexion y del tablero. Nunca devuelve el token (solo su sufijo)."""
+    from infra import jira_config
+
+    return jira_config.estado()
+
+
+@app.put("/config/jira/conexion", dependencies=_ADMIN)
+def guardar_conexion_jira(body: dict[str, Any]) -> dict[str, Any]:
+    from infra import jira_config
+
+    campos = [body.get(k, "") for k in ("sitio", "correo", "token")]
+    if not all(isinstance(c, str) for c in campos):
+        raise HTTPException(422, "sitio, correo y token deben ser texto")
+    _config_jira(jira_config.guardar_conexion, *campos, _usuario(body))
+    return jira_config.estado()
+
+
+@app.post("/config/jira/probar", dependencies=_ADMIN)
+def probar_jira() -> dict[str, Any]:
+    try:
+        return {"ok": True, "detalle": _config_jira(lambda: _cliente_jira().yo())}
+    except HTTPException as exc:  # _config_jira ya tradujo los errores de Jira y de config
+        return {"ok": False, "detalle": str(exc.detail)}
+
+
+@app.get("/config/jira/tableros", dependencies=_ADMIN)
+def tableros_jira() -> list[dict[str, Any]]:
+    return list(_config_jira(lambda: _cliente_jira().tableros()))
+
+
+@app.get("/config/jira/tableros/{tablero_id}/columnas", dependencies=_ADMIN)
+def columnas_jira(tablero_id: int) -> list[dict[str, Any]]:
+    cols = _config_jira(lambda: _cliente_jira().columnas(tablero_id))
+    return [{"nombre": c.nombre, "estados": list(c.estados)} for c in cols]
+
+
+@app.put("/config/jira/tablero", dependencies=_ADMIN)
+def guardar_tablero_jira(body: dict[str, Any]) -> dict[str, Any]:
+    """El navegador manda NOMBRES de columna; los estados se vuelven a leer de Jira."""
+    from infra import jira_config
+
+    tablero_id, intervalo = body.get("tablero_id"), body.get("intervalo_s", 60)
+    if not isinstance(tablero_id, int) or not isinstance(intervalo, int):
+        raise HTTPException(422, "tablero_id e intervalo_s deben ser enteros")
+    usuario = _usuario(body)
+    cliente = _config_jira(_cliente_jira)
+    por_nombre = {c.nombre: c for c in _config_jira(lambda: cliente.columnas(tablero_id))}
+    nombre_tablero = next(
+        (t["nombre"] for t in _config_jira(cliente.tableros) if t["id"] == tablero_id), ""
+    )
+
+    def columna(clave: str, obligatoria: bool) -> Any:
+        nombre = body.get(clave)
+        if nombre is None and not obligatoria:
+            return None
+        if nombre not in por_nombre:
+            raise HTTPException(422, f"columna {nombre!r} no existe en el tablero")
+        return por_nombre[nombre]
+
+    _config_jira(
+        jira_config.guardar_tablero,
+        tablero_id,
+        nombre_tablero,
+        columna("entrada", True),
+        columna("resuelto", False),
+        columna("escalado", False),
+        intervalo,
+        usuario,
+    )
+    return jira_config.estado()
+
+
+@app.put("/config/jira/activo", dependencies=_ADMIN)
+def activar_jira(body: dict[str, Any]) -> dict[str, Any]:
+    from agents.aiops import jira_poller
+    from infra import jira_config
+
+    activo = body.get("activo")
+    if not isinstance(activo, bool):
+        raise HTTPException(422, "falta 'activo' (true/false)")
+    _config_jira(jira_config.activar, activo, _usuario(body))
+    if activo:
+        jira_poller.programar(5)
+    return jira_config.estado()
+
+
 # --- Chat de consulta (agents/aiops/chat.py): SOLO LECTURA, no ejecuta nada -------
 
 _MAX_MENSAJE = 4000
