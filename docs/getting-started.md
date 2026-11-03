@@ -44,3 +44,19 @@ Nunca commitear `.env`.
 Sumar el profile a `COMPOSE_PROFILES` en `.env`, por ejemplo
 `COMPOSE_PROFILES=redis,qdrant,garage`. `redis` levanta también el `worker` RQ.
 Detalle en `infra/README.md`.
+
+## Conectar Jira
+
+Jira Cloud puede ser una fuente de incidentes: el agente sondea la columna de entrada de un
+tablero y cada ticket nuevo entra como alerta (ver D22).
+
+1. Crear un API token en `id.atlassian.com/manage-profile/security/api-tokens`.
+2. Abrir la UI del agente e ingresar el token admin en la parte superior.
+3. En la sección Jira, cargar el sitio (`https://<empresa>.atlassian.net`), el correo y el API token. Pulsar **Guardar conexión**.
+4. Pulsar **Probar conexión**.
+5. Pulsar **Cargar tableros** y elegir el tablero.
+6. Elegir la columna de **Entrada**, la de resuelto y la de escalado. Ajustar **Cada** (segundos) y pulsar **Guardar tablero**.
+7. Pulsar **Activar escucha**. Para pausarla, pulsar **Pausar escucha**.
+
+Etiquetas recomendadas en cada ticket: `servicio:<nombre>` y `categoria:<id>` (por ejemplo
+`servicio:api` y `categoria:pod_fallido`). Sin ellas, el agente clasifica con el LLM.

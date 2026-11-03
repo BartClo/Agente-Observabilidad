@@ -543,3 +543,19 @@ Con una imagen inexistente: `ErrImagePull` / `ImagePullBackOff` con el motivo y 
 
 **No resuelto.** Falta medir si mejora la TRA o la abstención en las variantes confusoras con el
 modelo congelado; cambia el agente medido, así que se valida en vivo antes de congelar.
+
+## D22. Jira Cloud como segunda fuente de incidentes
+
+**Decisión (con el autor).** Un poller en el worker escucha la columna de entrada de un tablero
+y encola cada ticket nuevo como alerta, por el mismo camino que Grafana. Clasificación: etiquetas
+`servicio:`/`categoria:`; si faltan, una llamada corta al LLM; el dominio valida. Al cerrar,
+escalar o descartar, el agente comenta (plantilla, no LLM) y transiciona a la columna
+configurada. Configuración desde la UI; token cifrado con Fernet y nunca devuelto.
+
+**Por qué así.** Polling y no webhooks: no exige URL pública. Misma cola, política y auditoría
+que Grafana: Jira no abre un camino nuevo hacia las acciones. El ticket no es evidencia: el
+agente confirma con telemetría. El sondeo agenda el siguiente antes de trabajar y evita duplicados consultando el `ScheduledJobRegistry` de RQ; el job tiene timeout de 600 s.
+
+**Límites.** Solo Jira Cloud y un tablero; tickets vistos que siguen en la columna ocupan
+lugar en la lectura de 50; la clasificación de respaldo gasta tokens que no se suman al
+incidente. Las corridas medidas fijan `AIOPS_JIRA=0`. Un ticket cuya clasificación o encolado falla se suelta y se reintenta en el siguiente sondeo.

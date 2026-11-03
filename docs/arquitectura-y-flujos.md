@@ -73,6 +73,10 @@ flowchart LR
 | **API** | `app/api.py` | Webhook de Grafana, incidentes, aprobación, kill switch, config LLM, chat, métricas | FastAPI, dominio |
 | **UI** | `app/ui/` | Panel embebido en Grafana (iframe): incidentes, aprobación, kill switch, modelo | API |
 | **Infraestructura** | `infra/` | Adaptadores: Prometheus/Loki, Kubernetes, Postgres, Google Chat, cifrado de keys, checkpointer | psycopg, httpx |
+| **Poller Jira** | `agents/aiops/jira_poller.py` | Sondea la columna de entrada de Jira y encola cada ticket nuevo como alerta (D22) | RQ, Redis, `jira_entrada` |
+| **Entrada Jira** | `agents/aiops/jira_entrada.py` | Clasifica el ticket (etiquetas o respaldo LLM) y valida servicio y categoría (D22) | dominio, `infra.jira` |
+| **Cliente Jira** | `infra/jira.py` | Cliente REST de Jira Cloud: tickets, comentarios y transiciones (D22) | httpx |
+| **Configuración Jira** | `infra/jira_config.py` | Conexión (token cifrado), tablero, columnas y estado de la escucha (D22) | psycopg, cifrado |
 | **RAG** | `rag/` | Embeddings (Gemini), lectura MD/PDF, almacén pgvector, calibración | pgvector, Gemini |
 | **Experimento** | `scripts/` | Inyección de fallas, runner, congelado, línea base, análisis estadístico | todo lo anterior |
 
@@ -205,6 +209,9 @@ sequenceDiagram
     D->>PG: estado final + auditoría + costo
     W->>C: resumen (bandeja de salida)
 ```
+
+Entrada por Jira (D22): `jira_poller.sondear` (cada `intervalo_s`) → `_encolar` →
+`worker_jobs.encolar_alerta` → mismo job que el webhook, desde la cola en adelante.
 
 Tiempos medidos en el camino real: detección 17–38 s (mediana 25 s) y MTTR de 39 a 77 s,
 incluyendo la espera de la regla de Grafana (evalúa cada 10 s con `for: 10s`).
