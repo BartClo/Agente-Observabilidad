@@ -6,101 +6,195 @@
 <title>AIOps L1</title>
 <style>
   :root {
-    --bg: #f6f7f9; --panel: #ffffff; --text: #1d2128; --muted: #5b6472; --line: #dde1e7;
-    --accent: #2f6fde; --ok: #1f8a4c; --warn: #b26b00; --bad: #c4352b; --chip: #eef1f5;
+    --bg: #f4f5f8; --panel: #ffffff; --panel-2: #f9fafb; --text: #1b1f27; --muted: #5d6673;
+    --line: #e1e4ea; --accent: #2f6fde; --accent-soft: #e7efff; --ok: #1f8a4c; --ok-soft: #e4f5ec;
+    --warn: #a86400; --warn-soft: #fff3df; --bad: #c4352b; --bad-soft: #fde9e7; --chip: #eef1f5;
+    --radio: 8px; --sombra: 0 1px 2px rgba(16,24,40,.06);
   }
   @media (prefers-color-scheme: dark) {
     :root {
-      --bg: #111217; --panel: #181b1f; --text: #d8dbe0; --muted: #8e95a1; --line: #2b2f36;
-      --accent: #5b9bff; --ok: #3ec27a; --warn: #f0a83a; --bad: #f2645a; --chip: #22262c;
+      --bg: #0f1115; --panel: #171a1f; --panel-2: #1c2026; --text: #d9dce1; --muted: #8f97a3;
+      --line: #2a2f37; --accent: #5b9bff; --accent-soft: #1c2a42; --ok: #3ec27a; --ok-soft: #15291f;
+      --warn: #f0a83a; --warn-soft: #2d2313; --bad: #f2645a; --bad-soft: #321a19; --chip: #23272e;
+      --sombra: none;
     }
   }
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--bg); color: var(--text);
-         font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
-  main { padding: 16px; max-width: 1200px; margin: 0 auto; display: grid; gap: 16px; }
-  h1 { font-size: 16px; margin: 0; }
-  h2 { font-size: 13px; margin: 0 0 8px; color: var(--muted); font-weight: 600;
-       text-transform: uppercase; letter-spacing: .04em; }
-  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 12px; }
+         font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  [hidden] { display: none !important; }
+
+  /* Barra superior: marca, pestañas y sesión */
+  header.top { position: sticky; top: 0; z-index: 5; background: var(--panel);
+               border-bottom: 1px solid var(--line); }
+  .top-in { max-width: 1320px; margin: 0 auto; padding: 8px 16px; display: flex;
+            flex-wrap: wrap; align-items: center; gap: 8px 16px; }
+  h1 { font-size: 15px; margin: 0; display: flex; align-items: center; gap: 8px; white-space: nowrap; }
+  .logo { width: 22px; height: 22px; border-radius: 6px; background: var(--accent); color: #fff;
+          display: grid; place-items: center; font-size: 11px; font-weight: 700; }
+  nav.tabs { display: flex; gap: 2px; }
+  nav.tabs button { border: 0; background: none; padding: 8px 12px; border-radius: 6px;
+                    color: var(--muted); font-weight: 600; }
+  nav.tabs button[aria-selected="true"] { background: var(--accent-soft); color: var(--accent); }
+  .sesion { margin-left: auto; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  .sesion input { width: 160px; }
+  #estado { color: var(--muted); font-size: 12px; width: 100%; text-align: right; }
+  #estado:empty { display: none; }
+
+  main { padding: 16px; max-width: 1320px; margin: 0 auto; display: grid; gap: 16px; }
+  .vista { display: grid; gap: 16px; }
+  h2 { font-size: 12px; margin: 0; color: var(--muted); font-weight: 600;
+       text-transform: uppercase; letter-spacing: .05em; }
+  h3 { font-size: 14px; margin: 0; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radio);
+           padding: 14px; box-shadow: var(--sombra); min-width: 0; }
+  .cabeza { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 10px; }
+  .cabeza .espacio, .barra .espacio { flex: 1; }
   .barra { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-  .barra .espacio { flex: 1; }
-  input, select { background: var(--bg); color: var(--text); border: 1px solid var(--line);
-          border-radius: 4px; padding: 6px 8px; font: inherit; min-width: 0; }
-  button { font: inherit; border-radius: 4px; padding: 6px 10px; cursor: pointer;
-           border: 1px solid var(--line); background: var(--chip); color: var(--text); }
+
+  input, select { background: var(--panel-2); color: var(--text); border: 1px solid var(--line);
+          border-radius: 6px; padding: 7px 9px; font: inherit; min-width: 0; }
+  input::placeholder { color: var(--muted); opacity: .8; }
+  input[type="checkbox"] { padding: 0; }
+  button { font: inherit; border-radius: 6px; padding: 7px 12px; cursor: pointer;
+           border: 1px solid var(--line); background: var(--chip); color: var(--text); white-space: nowrap; }
+  button:hover:not(:disabled) { filter: brightness(.96); }
   button.primario { background: var(--accent); border-color: var(--accent); color: #fff; }
-  button.peligro { border-color: var(--bad); color: var(--bad); }
+  button.peligro { border-color: var(--bad); color: var(--bad); background: transparent; }
   button:disabled { opacity: .5; cursor: default; }
-  button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-  .tarjetas { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); }
-  .tarjeta .valor { font-size: 24px; font-weight: 600; margin-top: 4px; font-variant-numeric: tabular-nums; }
-  .tarjeta .sub { color: var(--muted); font-size: 12px; }
+  button:focus-visible, input:focus-visible, select:focus-visible, tr.fila:focus-visible {
+    outline: 2px solid var(--accent); outline-offset: 1px; }
+
+  /* Métricas */
+  .tarjetas { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); }
+  .tarjeta { border-left: 4px solid var(--accent); }
+  .tarjeta.kill { border-left-color: var(--line); }
+  .tarjeta.kill.activo { border-left-color: var(--bad); background: var(--bad-soft); }
+  .tarjeta .valor { font-size: 26px; font-weight: 650; margin: 2px 0; font-variant-numeric: tabular-nums; }
+  .fila-kill { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+
+  /* Operación: tabla + detalle lado a lado */
+  .operacion { display: grid; gap: 16px; grid-template-columns: minmax(0, 1.7fr) minmax(300px, 1fr);
+               align-items: start; }
+  @media (max-width: 980px) { .operacion { grid-template-columns: 1fr; } }
+  #detalle { position: sticky; top: 76px; max-height: calc(100vh - 92px); overflow-y: auto; }
+  .filtros input[type="search"] { width: 230px; }
+  .filtros label { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 13px; }
   .tabla { width: 100%; overflow-x: auto; }
   table { width: 100%; border-collapse: collapse; }
-  th, td { text-align: left; padding: 8px; border-bottom: 1px solid var(--line); vertical-align: middle; }
-  th { color: var(--muted); font-weight: 600; font-size: 12px; }
+  th, td { text-align: left; padding: 9px 8px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+  th { color: var(--muted); font-weight: 600; font-size: 12px; background: var(--panel-2); }
   tr.fila { cursor: pointer; }
-  tr.fila:hover, tr.fila.sel { background: var(--chip); }
+  tr.fila:hover { background: var(--panel-2); }
+  tr.fila.sel { background: var(--accent-soft); box-shadow: inset 3px 0 0 var(--accent); }
   .mono { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12px; }
-  .chip { display: inline-block; padding: 1px 8px; border-radius: 999px; background: var(--chip);
-          font-size: 12px; white-space: nowrap; }
-  .chip.resuelto { color: var(--ok); } .chip.escalado { color: var(--bad); }
-  .chip.espera { color: var(--warn); font-weight: 600; }
+  .chip { display: inline-block; padding: 2px 9px; border-radius: 999px; background: var(--chip);
+          font-size: 12px; font-weight: 600; white-space: nowrap; }
+  .chip.resuelto, .chip.cerrado { color: var(--ok); background: var(--ok-soft); }
+  .chip.escalado, .chip.descartado { color: var(--bad); background: var(--bad-soft); }
+  .chip.espera { color: var(--warn); background: var(--warn-soft); }
   .acciones { display: flex; gap: 6px; }
-  ol.linea { list-style: none; margin: 0; padding: 0; }
-  ol.linea li { padding: 6px 0; border-bottom: 1px solid var(--line); display: grid;
-                grid-template-columns: 90px 160px 1fr; gap: 8px; }
-  ol.linea .datos { color: var(--muted); overflow-wrap: anywhere; }
-  .vacio { color: var(--muted); padding: 8px 0; }
+  .vacio { color: var(--muted); padding: 14px 8px; text-align: center; }
   .aviso { color: var(--bad); }
-  ol.chat { list-style: none; margin: 0 0 8px; padding: 0; max-height: 380px; overflow-y: auto;
-            display: flex; flex-direction: column; gap: 6px; }
-  ol.chat li { padding: 6px 10px; border-radius: 6px; max-width: 85%; white-space: pre-wrap;
+
+  /* Línea de tiempo vertical */
+  #detalle-resumen { display: grid; gap: 4px; margin: 0 0 14px; padding: 10px; border-radius: 6px;
+                     background: var(--panel-2); overflow-wrap: anywhere; }
+  ol.linea { list-style: none; margin: 0 0 0 6px; padding: 0 0 0 16px; border-left: 2px solid var(--line); }
+  ol.linea li { position: relative; padding: 0 0 12px 4px; display: grid; gap: 1px; }
+  ol.linea li::before { content: ""; position: absolute; left: -23px; top: 5px; width: 10px; height: 10px;
+                        border-radius: 50%; background: var(--panel); border: 2px solid var(--accent); }
+  ol.linea li > span:first-child { color: var(--muted); }
+  ol.linea .datos { color: var(--muted); overflow-wrap: anywhere; }
+
+  /* Chat */
+  ol.chat { list-style: none; margin: 0 0 10px; padding: 12px; overflow-y: auto; display: flex;
+            flex-direction: column; gap: 8px; background: var(--panel-2); border-radius: 6px;
+            height: calc(100vh - 300px); min-height: 280px; }
+  ol.chat li { padding: 8px 12px; border-radius: 10px; max-width: 80%; white-space: pre-wrap;
                overflow-wrap: anywhere; }
-  ol.chat li.yo { align-self: flex-end; background: var(--accent); color: #fff; }
-  ol.chat li.agente { align-self: flex-start; background: var(--chip); }
-  ol.chat li.aviso-ev { align-self: center; color: var(--muted); font-size: 12px; background: none; }
-  .sub { color: var(--muted); font-size: 12px; }
-  #estado { color: var(--muted); font-size: 12px; }
-  @media (max-width: 640px) { ol.linea li { grid-template-columns: 1fr; } }
+  ol.chat li.yo { align-self: flex-end; background: var(--accent); color: #fff; border-bottom-right-radius: 3px; }
+  ol.chat li.agente { align-self: flex-start; background: var(--panel); border: 1px solid var(--line);
+                      border-bottom-left-radius: 3px; }
+  ol.chat li.aviso-ev { align-self: center; color: var(--muted); font-size: 12px; background: none; padding: 2px; }
+
+  /* Configuración */
+  .campos { display: grid; gap: 10px 12px; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+            align-items: end; }
+  .campos label { display: grid; gap: 4px; font-size: 12px; color: var(--muted); font-weight: 600; }
+  .campos label input, .campos label select { width: 100%; font-weight: 400; }
+  .pasos { display: grid; gap: 12px; }
+  .paso { border: 1px solid var(--line); border-radius: var(--radio); padding: 12px; background: var(--panel-2); }
+  .paso > .cabeza { margin-bottom: 8px; }
+  .num { width: 22px; height: 22px; border-radius: 50%; background: var(--accent); color: #fff;
+         display: grid; place-items: center; font-size: 12px; font-weight: 700; flex: none; }
+  .estado-jira { padding: 2px 9px; border-radius: 999px; font-size: 12px; font-weight: 600;
+                 background: var(--chip); color: var(--muted); }
+  .estado-jira.on { background: var(--ok-soft); color: var(--ok); }
+  .estado-jira.error { background: var(--bad-soft); color: var(--bad); }
+  .sub { color: var(--muted); font-size: 12px; margin: 6px 0 0; }
+  @media (max-width: 640px) { .sesion { margin-left: 0; } .sesion input { width: 130px; } }
 </style>
 </head>
 <body>
-<main>
-  <div class="panel barra">
-    <h1>AIOps · incidentes L1</h1>
-    <span class="espacio"></span>
-    <label>Usuario <input id="usuario" placeholder="ana@equipo" autocomplete="username" size="14"></label>
-    <label>Token <input id="token" type="password" autocomplete="off" size="14"></label>
-    <button id="guardar" class="primario">Conectar</button>
+<header class="top">
+  <div class="top-in">
+    <h1><span class="logo" aria-hidden="true">AI</span>AIOps · incidentes L1</h1>
+    <nav class="tabs" role="tablist" aria-label="Secciones">
+      <button role="tab" data-tab="operacion" aria-selected="true">Operación</button>
+      <button role="tab" data-tab="chat" aria-selected="false">Chat</button>
+      <button role="tab" data-tab="config" aria-selected="false">Configuración</button>
+    </nav>
+    <div class="sesion">
+      <input id="usuario" placeholder="usuario (ana@equipo)" autocomplete="username" aria-label="Usuario">
+      <input id="token" type="password" autocomplete="off" placeholder="token" aria-label="Token">
+      <button id="guardar" class="primario">Conectar</button>
+    </div>
     <span id="estado" role="status" aria-live="polite"></span>
   </div>
+</header>
+<main>
+  <div class="vista" data-panel="operacion">
+    <section class="tarjetas" aria-label="Métricas de la tesis">
+      <div class="panel tarjeta"><h2>TRA</h2><div class="valor" id="m-tra">–</div>
+        <div class="sub">resueltos sin humano / elegibles</div></div>
+      <div class="panel tarjeta"><h2>MTTR</h2><div class="valor" id="m-mttr">–</div>
+        <div class="sub">desde el disparo de la alerta</div></div>
+      <div class="panel tarjeta"><h2>Incidentes</h2><div class="valor" id="m-total">–</div>
+        <div class="sub" id="m-espera"></div></div>
+      <div class="panel tarjeta kill" id="tarjeta-kill"><h2>Kill switch</h2>
+        <div class="fila-kill"><div class="valor" id="m-kill">–</div>
+          <button id="kill" class="peligro" disabled>–</button></div>
+        <div class="sub">frena toda ejecución del agente</div></div>
+    </section>
 
-  <section class="tarjetas" aria-label="Métricas de la tesis">
-    <div class="panel tarjeta"><h2>TRA</h2><div class="valor" id="m-tra">–</div>
-      <div class="sub">resueltos sin humano / elegibles</div></div>
-    <div class="panel tarjeta"><h2>MTTR</h2><div class="valor" id="m-mttr">–</div>
-      <div class="sub">desde el disparo de la alerta</div></div>
-    <div class="panel tarjeta"><h2>Incidentes</h2><div class="valor" id="m-total">–</div>
-      <div class="sub" id="m-espera"></div></div>
-    <div class="panel tarjeta"><h2>Kill switch</h2><div class="valor" id="m-kill">–</div>
-      <button id="kill" class="peligro" disabled>–</button></div>
-  </section>
+    <div class="operacion">
+      <section class="panel" aria-labelledby="inc-titulo">
+        <div class="cabeza filtros">
+          <h2 id="inc-titulo">Incidentes</h2><span class="espacio"></span>
+          <input id="inc-buscar" type="search" placeholder="Buscar id, alerta o servicio" aria-label="Buscar incidentes">
+          <label><input id="inc-espera" type="checkbox"> solo esperando aprobación</label>
+        </div>
+        <div class="tabla">
+          <table>
+            <thead><tr><th>Incidente</th><th>Alerta</th><th>Servicio</th><th>Estado</th>
+              <th>Autónomo</th><th>Decisión humana</th></tr></thead>
+            <tbody id="filas"><tr><td colspan="6" class="vacio">Conectá con tu usuario y token (arriba a la derecha) para ver los incidentes.</td></tr></tbody>
+          </table>
+        </div>
+      </section>
 
-  <section class="panel">
-    <h2>Incidentes</h2>
-    <div class="tabla">
-      <table>
-        <thead><tr><th>Incidente</th><th>Alerta</th><th>Servicio</th><th>Estado</th>
-          <th>Autónomo</th><th>Decisión humana</th></tr></thead>
-        <tbody id="filas"><tr><td colspan="6" class="vacio">Conectar con el token para ver los incidentes.</td></tr></tbody>
-      </table>
+      <section class="panel" id="detalle" aria-labelledby="detalle-titulo">
+        <h2 id="detalle-titulo" style="margin-bottom:10px">Línea de tiempo</h2>
+        <p id="detalle-vacio" class="vacio">Elegí un incidente para ver qué hizo el agente, paso a paso.</p>
+        <div id="detalle-resumen" class="mono" hidden></div>
+        <ol class="linea" id="linea"></ol>
+      </section>
     </div>
-  </section>
+  </div>
 
-  <section class="panel" aria-labelledby="chat-titulo">
-    <div class="barra"><h2 id="chat-titulo">Chat con el agente · solo consulta</h2>
+  <section class="panel" data-panel="chat" hidden aria-labelledby="chat-titulo">
+    <div class="cabeza"><h2 id="chat-titulo">Chat con el agente · solo consulta</h2>
       <span class="espacio"></span><button id="chat-nueva">Nueva conversación</button></div>
     <ol id="chat-log" class="chat" aria-live="polite"></ol>
     <form id="chat-form" class="barra">
@@ -108,74 +202,94 @@
       <button class="primario" id="chat-enviar">Enviar</button>
     </form>
     <p class="sub">Responde sobre incidentes, historial, métricas y runbooks. No ejecuta ni aprueba nada:
-      eso lo hace el agente solo o vos con los botones de arriba. Los avisos 🔔 son lo que hizo el agente.</p>
+      eso lo hace el agente solo o vos desde Operación. Los avisos 🔔 son lo que hizo el agente.</p>
   </section>
 
-  <section class="panel" aria-labelledby="llm-titulo">
-    <h2 id="llm-titulo">Modelo del agente</h2>
-    <div class="barra">
-      <label>Token admin <input id="admin-token" type="password" autocomplete="off" size="14"></label>
-      <button id="llm-cargar">Ver configuración</button>
-      <span id="llm-activo" class="mono"></span>
-    </div>
-    <div id="llm-cuerpo" hidden>
-      <div class="tabla"><table>
-        <thead><tr><th>Proveedor</th><th>API key</th><th>Cargar / reemplazar</th><th></th></tr></thead>
-        <tbody id="llm-filas"></tbody>
-      </table></div>
-      <div class="barra" style="margin-top:8px">
-        <label>Proveedor <select id="llm-prov"></select></label>
-        <label>Modelo <input id="llm-modelo" size="24" spellcheck="false"></label>
-        <button id="llm-probar">Probar conexión</button>
-        <button id="llm-usar" class="primario">Usar este modelo</button>
-        <button id="llm-default">Volver al default</button>
+  <div class="vista" data-panel="config" hidden>
+    <section class="panel">
+      <div class="barra">
+        <div class="campos" style="flex:1;max-width:360px">
+          <label>Token admin (solo en memoria)
+            <input id="admin-token" type="password" autocomplete="off" placeholder="AIOPS_ADMIN_TOKEN"></label>
+        </div>
+        <button id="llm-cargar" class="primario" style="align-self:end">Cargar configuración</button>
+        <span class="sub" style="align-self:end;margin:0 0 8px">Las API keys y el token de Jira se guardan cifrados y no se vuelven a mostrar.</span>
       </div>
-      <div class="barra" style="margin-top:8px">
-        <strong>Respaldo</strong>
-        <label>Proveedor <select id="resp-prov"></select></label>
-        <label>Modelo <input id="resp-modelo" size="24" spellcheck="false"></label>
-        <button id="resp-usar">Usar como respaldo</button>
-        <button id="resp-quitar">Quitar</button>
-        <span id="resp-activo" class="mono"></span>
+    </section>
+
+    <section class="panel" aria-labelledby="llm-titulo">
+      <div class="cabeza"><h2 id="llm-titulo">Modelo del agente</h2><span class="espacio"></span>
+        <span id="llm-activo" class="mono"></span></div>
+      <p class="sub" style="margin:0" id="llm-pista">Ingresá el token admin y pulsá «Cargar configuración».</p>
+      <div id="llm-cuerpo" hidden>
+        <div class="tabla"><table>
+          <thead><tr><th>Proveedor</th><th>API key</th><th>Cargar / reemplazar</th><th></th></tr></thead>
+          <tbody id="llm-filas"></tbody>
+        </table></div>
+        <div class="pasos" style="margin-top:12px">
+          <div class="paso">
+            <div class="cabeza"><h3>Principal</h3></div>
+            <div class="campos">
+              <label>Proveedor <select id="llm-prov"></select></label>
+              <label>Modelo <input id="llm-modelo" spellcheck="false"></label>
+              <div class="barra"><button id="llm-probar">Probar conexión</button>
+                <button id="llm-usar" class="primario">Usar este modelo</button>
+                <button id="llm-default">Volver al default</button></div>
+            </div>
+          </div>
+          <div class="paso">
+            <div class="cabeza"><h3>Respaldo</h3><span class="espacio"></span><span id="resp-activo" class="mono"></span></div>
+            <div class="campos">
+              <label>Proveedor <select id="resp-prov"></select></label>
+              <label>Modelo <input id="resp-modelo" spellcheck="false"></label>
+              <div class="barra"><button id="resp-usar">Usar como respaldo</button>
+                <button id="resp-quitar">Quitar</button></div>
+            </div>
+            <p class="sub">Si el modelo principal falla a mitad de un incidente, el respaldo lo retoma desde donde quedó.</p>
+          </div>
+        </div>
+        <p class="sub">Cambiar el modelo durante un experimento invalida la comparación entre corridas.</p>
       </div>
-      <p class="sub">Si el modelo principal falla a mitad de un incidente, el respaldo lo retoma desde donde quedó.</p>
-      <p class="sub">Cambiar el modelo durante un experimento invalida la comparación entre corridas.
-        La key se guarda cifrada y no se vuelve a mostrar.</p>
-    </div>
-  </section>
+    </section>
 
-  <section class="panel" aria-labelledby="jira-titulo">
-    <h2 id="jira-titulo">Jira · tickets como fuente de incidentes</h2>
-    <p class="sub">Usa el token admin de arriba. El agente escucha la columna de entrada del tablero,
-      confirma con telemetría y comenta el resultado en el ticket.</p>
-    <div class="barra">
-      <label>Sitio <input id="jira-sitio" size="26" placeholder="https://empresa.atlassian.net" spellcheck="false"></label>
-      <label>Correo <input id="jira-correo" size="20" spellcheck="false"></label>
-      <label>API token <input id="jira-token" type="password" autocomplete="off" size="16" placeholder="vacío = conservar"></label>
-      <button id="jira-guardar">Guardar conexión</button>
-      <button id="jira-probar">Probar conexión</button>
-      <span id="jira-sufijo" class="mono"></span>
-    </div>
-    <div class="barra" style="margin-top:8px">
-      <button id="jira-cargar">Cargar tableros</button>
-      <label>Tablero <select id="jira-tablero"></select></label>
-      <label>Entrada <select id="jira-entrada"></select></label>
-      <label>Si se resolvió <select id="jira-resuelto"></select></label>
-      <label>Si se escaló <select id="jira-escalado"></select></label>
-      <label>Cada <input id="jira-intervalo" type="number" min="30" value="60" style="width:5em"> s</label>
-      <button id="jira-tablero-guardar" class="primario">Guardar tablero</button>
-    </div>
-    <div class="barra" style="margin-top:8px">
-      <button id="jira-activar">Activar escucha</button>
-      <span id="jira-estado" class="mono"></span>
-    </div>
-  </section>
-
-  <section class="panel" id="detalle" hidden>
-    <h2 id="detalle-titulo">Línea de tiempo</h2>
-    <p id="detalle-resumen" class="mono"></p>
-    <ol class="linea" id="linea"></ol>
-  </section>
+    <section class="panel" aria-labelledby="jira-titulo">
+      <div class="cabeza"><h2 id="jira-titulo">Jira · tickets como fuente de incidentes</h2>
+        <span class="espacio"></span><span id="jira-estado" class="estado-jira">sin cargar</span></div>
+      <p class="sub" style="margin:0 0 12px">El agente escucha la columna de entrada del tablero, confirma con
+        telemetría y comenta el resultado en el ticket. Etiquetas recomendadas en el ticket:
+        <span class="mono">servicio:&lt;nombre&gt;</span> y <span class="mono">categoria:&lt;id&gt;</span>.</p>
+      <div class="pasos">
+        <div class="paso">
+          <div class="cabeza"><span class="num">1</span><h3>Conexión</h3><span class="espacio"></span>
+            <span id="jira-sufijo" class="mono"></span></div>
+          <div class="campos">
+            <label>Sitio <input id="jira-sitio" placeholder="https://empresa.atlassian.net" spellcheck="false"></label>
+            <label>Correo <input id="jira-correo" spellcheck="false" placeholder="ops@empresa.com"></label>
+            <label>API token <input id="jira-token" type="password" autocomplete="off" placeholder="vacío = conservar"></label>
+            <div class="barra"><button id="jira-guardar" class="primario">Guardar</button>
+              <button id="jira-probar">Probar</button></div>
+          </div>
+        </div>
+        <div class="paso">
+          <div class="cabeza"><span class="num">2</span><h3>Tablero y columnas</h3><span class="espacio"></span>
+            <button id="jira-cargar">Cargar tableros</button></div>
+          <div class="campos">
+            <label>Tablero <select id="jira-tablero"></select></label>
+            <label>Columna de entrada <select id="jira-entrada"></select></label>
+            <label>Si se resolvió, mover a <select id="jira-resuelto"></select></label>
+            <label>Si se escaló, mover a <select id="jira-escalado"></select></label>
+            <label>Consultar cada (s) <input id="jira-intervalo" type="number" min="30" value="60"></label>
+            <div class="barra"><button id="jira-tablero-guardar" class="primario">Guardar tablero</button></div>
+          </div>
+        </div>
+        <div class="paso">
+          <div class="cabeza"><span class="num">3</span><h3>Escucha</h3><span class="espacio"></span>
+            <button id="jira-activar">Activar escucha</button></div>
+          <p id="jira-detalle" class="sub" style="margin:0">Guardá la conexión y el tablero para poder activarla.</p>
+        </div>
+      </div>
+    </section>
+  </div>
 </main>
 <script>
 "use strict";
@@ -237,18 +351,25 @@ async function decidir(id, veredicto) {
   } catch (e) { $("estado").textContent = "Error: " + e.message; }
 }
 
-function pintarFilas(incidentes) {
+let ultimosIncidentes = [];
+function pintarFilas(todos) {
+  ultimosIncidentes = todos;
+  const q = $("inc-buscar").value.trim().toLowerCase();
+  const incidentes = todos.filter((i) => (!$("inc-espera").checked || enEspera(i)) &&
+    (!q || [i.id, i.alerta, i.servicio].some((v) => String(v || "").toLowerCase().includes(q))));
   const tbody = $("filas");
   tbody.replaceChildren();
   if (!incidentes.length) {
-    const tr = el("tr"); const td = el("td", "Sin incidentes.", "vacio"); td.colSpan = 6;
+    const tr = el("tr");
+    const td = el("td", todos.length ? "Ningún incidente coincide con el filtro." : "Sin incidentes.", "vacio");
+    td.colSpan = 6;
     tr.append(td); tbody.append(tr); return;
   }
   incidentes.sort((a, b) => (b.abierto_en || 0) - (a.abierto_en || 0));
   for (const i of incidentes) {
     const tr = el("tr", null, "fila" + (i.id === seleccionado ? " sel" : ""));
     tr.tabIndex = 0;
-    tr.addEventListener("click", () => { seleccionado = i.id; verDetalle(i.id); pintarFilas(incidentes); });
+    tr.addEventListener("click", () => { seleccionado = i.id; verDetalle(i.id); pintarFilas(todos); });
     tr.addEventListener("keydown", (ev) => { if (ev.key === "Enter") tr.click(); });
     const decision = el("td");
     if (enEspera(i)) {
@@ -271,11 +392,12 @@ function pintarFilas(incidentes) {
 async function verDetalle(id) {
   try {
     const d = await api(`/incidentes/${encodeURIComponent(id)}`);
-    $("detalle").hidden = false;
+    $("detalle-vacio").hidden = true;
     $("detalle-titulo").textContent = "Línea de tiempo · " + d.id;
-    $("detalle-resumen").textContent =
-      `causa: ${d.causa ?? "—"} · confianza: ${d.confianza} · acciones: ${d.acciones.length}` +
-      (d.motivo_escalamiento ? ` · escalado: ${d.motivo_escalamiento}` : "");
+    const res = $("detalle-resumen"); res.hidden = false; res.replaceChildren(
+      el("span", `causa: ${d.causa ?? "—"}`),
+      el("span", `confianza: ${d.confianza} · acciones: ${d.acciones.length}`));
+    if (d.motivo_escalamiento) res.append(el("span", `escalado: ${d.motivo_escalamiento}`, "aviso"));
     const ol = $("linea"); ol.replaceChildren();
     for (const e of d.linea_de_tiempo) {
       const li = el("li");
@@ -298,6 +420,7 @@ async function refrescar() {
     $("m-espera").textContent = espera ? `${espera} esperando aprobación` : "ninguno esperando";
     $("m-kill").textContent = ks.activo ? "ACTIVO" : "apagado";
     $("m-kill").className = "valor" + (ks.activo ? " aviso" : "");
+    $("tarjeta-kill").classList.toggle("activo", ks.activo);
     const kb = $("kill");
     kb.disabled = false;
     kb.textContent = ks.activo ? "Desactivar" : "Activar";
@@ -329,7 +452,7 @@ $("kill").addEventListener("click", async () => {
 const admin = (ruta, opciones) => api(ruta, opciones, $("admin-token").value.trim());
 
 function pintarLLM(cfg) {
-  $("llm-cuerpo").hidden = false;
+  $("llm-cuerpo").hidden = false; $("llm-pista").hidden = true;
   const a = cfg.activo;
   $("llm-activo").textContent = a.proveedor ? `En uso: ${a.proveedor}:${a.modelo}` : "En uso: modelo por defecto (agent.yaml)";
   const tbody = $("llm-filas"); tbody.replaceChildren();
@@ -370,7 +493,8 @@ async function accionLLM(ruta, opciones) {
 }
 
 $("llm-cargar").addEventListener("click", async () => {
-  try { pintarLLM(await admin("/config/llm")); } catch (e) { $("estado").textContent = "Error: " + e.message; }
+  try { pintarLLM(await admin("/config/llm")); } catch (e) { $("estado").textContent = "Error: " + e.message; return; }
+  try { pintarJira(await admin("/config/jira")); } catch (e) { $("estado").textContent = "Error: " + e.message; }
 });
 $("llm-prov").addEventListener("change", () => { $("llm-modelo").placeholder = $("llm-prov").selectedOptions[0]?.dataset.ejemplo || ""; });
 $("llm-usar").addEventListener("click", () => accionLLM("/config/llm/activo",
@@ -398,7 +522,9 @@ function pintarJira(cfg) {
   const sondeo = cfg.ultimo_sondeo_en ? ` · último sondeo ${new Date(cfg.ultimo_sondeo_en).toLocaleTimeString()}, ${cfg.ultimo_sondeo_tickets} tickets` : "";
   const error = cfg.ultimo_error ? ` · error: ${cfg.ultimo_error}` : "";
   const tablero = cfg.tablero_nombre ? `${cfg.tablero_nombre} (${cfg.entrada})` : "sin tablero";
-  $("jira-estado").textContent = `${cfg.activo ? "Escuchando" : "En pausa"} · ${tablero}${sondeo}${error}`;
+  $("jira-estado").textContent = cfg.ultimo_error ? "Error" : (cfg.activo ? "Escuchando" : "En pausa");
+  $("jira-estado").className = "estado-jira" + (cfg.ultimo_error ? " error" : cfg.activo ? " on" : "");
+  $("jira-detalle").textContent = `${tablero}${sondeo}${error}`;
   $("jira-activar").textContent = cfg.activo ? "Pausar escucha" : "Activar escucha";
   $("jira-activar").dataset.activo = cfg.activo ? "1" : "";
   if (cfg.intervalo_s) $("jira-intervalo").value = cfg.intervalo_s;
@@ -505,6 +631,19 @@ $("chat-nueva").addEventListener("click", () => {
   conversacion = nuevaConversacion();
   $("chat-log").replaceChildren(); ultimoEvento = 0; avisos();
 });
+
+// --- Pestañas y filtros.
+function mostrar(tab) {
+  for (const b of document.querySelectorAll("nav.tabs button")) b.setAttribute("aria-selected", String(b.dataset.tab === tab));
+  for (const p of document.querySelectorAll("[data-panel]")) p.hidden = p.dataset.panel !== tab;
+  guardar("aiops-tab", tab);
+}
+for (const b of document.querySelectorAll("nav.tabs button")) b.addEventListener("click", () => mostrar(b.dataset.tab));
+const PESTANAS = ["operacion", "chat", "config"];
+const pedida = location.hash.slice(1);
+mostrar(PESTANAS.includes(pedida) ? pedida : (leer("aiops-tab") || "operacion"));
+$("inc-buscar").addEventListener("input", () => pintarFilas(ultimosIncidentes));
+$("inc-espera").addEventListener("change", () => pintarFilas(ultimosIncidentes));
 
 refrescar(); avisos();
 setInterval(refrescar, 5000);
