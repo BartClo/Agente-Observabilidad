@@ -222,17 +222,25 @@ def test_sondear_agenda_el_siguiente_antes_de_trabajar(
 def test_programar_con_cola_real_ve_el_sondeo_ya_agendado(
     entorno: dict[str, Any],
 ) -> None:
+    from rq.registry import ScheduledJobRegistry
+
     from infra.queue import get_queue
     from infra.redis_client import get_redis
 
-    get_queue("aiops").empty()  # type: ignore[no-untyped-call]
-    get_redis().delete(jira_poller._CLAVE_PROXIMO)
+    def limpiar() -> None:
+        cola = get_queue("aiops")
+        registro = ScheduledJobRegistry(queue=cola)  # type: ignore[no-untyped-call]
+        for job_id in registro.get_job_ids():
+            registro.remove(job_id, delete_job=True)
+        cola.empty()  # type: ignore[no-untyped-call]
+        get_redis().delete(jira_poller._CLAVE_PROXIMO)
+
+    limpiar()  # empty() no vacia los agendados: un job viejo haria fallar el test
     assert jira_poller.programar(300) is True
     get_redis().delete(jira_poller._CLAVE_PROXIMO)  # vence el candado corto
     assert jira_poller._hay_sondeo_agendado() is True
     assert jira_poller.programar(300) is False
-    get_queue("aiops").empty()  # type: ignore[no-untyped-call]
-    get_redis().delete(jira_poller._CLAVE_PROXIMO)
+    limpiar()
 
 
 def test_ticket_cuyo_encolado_falla_se_reintenta_en_el_siguiente_sondeo(
