@@ -48,6 +48,10 @@ def http(monkeypatch: pytest.MonkeyPatch) -> list[Any]:
             raise urllib.error.HTTPError(url, 401, "Unauthorized", {}, None)  # type: ignore[arg-type]
         if "caido" in url:
             raise urllib.error.URLError("timed out")
+        if "html" in url:
+            return _Resp(b"<html>login</html>")
+        if "lista" in url:
+            return _Resp(b"[1,2]")
         if url.endswith("/rest/api/2/myself"):
             return _Resp(json.dumps({"displayName": "Ops Bot"}).encode())
         if "/rest/agile/1.0/board?" in url:
@@ -128,3 +132,10 @@ def test_errores_http_y_de_red_son_error_jira_sin_el_token(http: list[Any]) -> N
     assert "tok" not in str(exc.value)
     with pytest.raises(ErrorJira, match="no responde"):
         _cliente("https://caido.atlassian.net").yo()
+
+
+def test_respuesta_no_json_o_no_objeto_es_error_jira(http: list[Any]) -> None:
+    with pytest.raises(ErrorJira, match="respuesta invalida"):
+        _cliente("https://html.atlassian.net").yo()
+    with pytest.raises(ErrorJira, match="respuesta invalida"):
+        _cliente("https://lista.atlassian.net").yo()

@@ -86,12 +86,18 @@ class ClienteJira:
         donde = f"{metodo} {ruta.split('?')[0]}"
         try:
             with urllib.request.urlopen(req, timeout=self._timeout) as resp:  # noqa: S310
-                cuerpo_resp = resp.read().decode()
+                crudo = resp.read()
         except urllib.error.HTTPError as exc:
             raise ErrorJira(f"Jira respondio {exc.code} en {donde}") from None
         except (urllib.error.URLError, TimeoutError, OSError) as exc:
             raise ErrorJira(f"Jira no responde en {donde}: {type(exc).__name__}") from None
-        return json.loads(cuerpo_resp) if cuerpo_resp else {}
+        try:
+            respuesta = json.loads(crudo.decode()) if crudo else {}
+        except ValueError:  # JSON invalido o no UTF-8 (UnicodeDecodeError es ValueError)
+            raise ErrorJira(f"respuesta invalida de Jira en {donde}") from None
+        if not isinstance(respuesta, dict):
+            raise ErrorJira(f"respuesta invalida de Jira en {donde}")
+        return respuesta
 
     def yo(self) -> str:
         return str(self._pedir("GET", "/rest/api/2/myself").get("displayName", "?"))
