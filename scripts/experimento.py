@@ -22,8 +22,10 @@ import argparse
 import csv
 import json
 import os
+import random
 import re
 import subprocess
+import threading
 import time
 import urllib.parse
 import urllib.request
@@ -37,6 +39,18 @@ RAIZ = Path(__file__).resolve().parent.parent
 PROMETHEUS = os.environ.get("EXP_PROMETHEUS", "http://localhost:9090")
 API = os.environ.get("EXP_API", "http://localhost:8010")
 GRAFANA = os.environ.get("EXP_GRAFANA", "http://localhost:3001")
+# Entorno real (ver docs/protocolo-experimento.md): solo se inyecta en un namespace de pruebas
+# declarado y etiquetado. `EXP_WORKER_EXTERNO=1`: el worker ya esta desplegado, sin Docker aca.
+NAMESPACE = os.environ.get("EXP_NAMESPACE", "aiops-lab")
+NAMESPACES_PERMITIDOS = os.environ.get("EXP_NAMESPACES_PERMITIDOS", "aiops-lab")
+ETIQUETA_NAMESPACE = "aiops-experimento"
+K8S_API = os.environ.get("EXP_K8S_API", "")
+WORKER_EXTERNO = os.environ.get("EXP_WORKER_EXTERNO") == "1"
+# Tesis, 6.5 y 6.6.
+ESTABILIDAD_S = 60.0  # servicio sano antes de cada corrida
+VENTANA_SEGUIMIENTO_S = 900.0  # desde t2; despues el caso cuenta como no resuelto
+GRACIA_ESCALADO_S = 30.0  # un escalado no espera los 15 min: ya no hay quien lo recupere
+LECTURAS_SANAS = 2  # t5 exige lecturas seguidas: un parpadeo no es una recuperacion
 
 
 @dataclass(frozen=True)
@@ -47,6 +61,9 @@ class Escenario:
     anomalia: str  # PromQL que da >0 resultados mientras la falla esta presente
     recuperar: str | None = None  # script para volver a sano entre corridas
     usa_k8s: bool = False
+    # PromQL con resultados SOLO si esta sano. No es la negacion de `anomalia`: sin datos, la
+    # anomalia tampoco da resultados y el servicio pareceria recuperado.
+    sana: str = ""
 
 
 ESCENARIOS: dict[str, Escenario] = {
@@ -57,14 +74,17 @@ ESCENARIOS: dict[str, Escenario] = {
         'max(up{service="checkout"}) < 1',
         "recuperar_servicio.sh",
         usa_k8s=True,
+        sana='max(up{service="checkout"}) >= 1',
     ),
     "pod_fallido": Escenario(
         "PodFailed",
         "api",
         "pod_fallido.sh",
-        'sum(kube_pod_status_ready{condition="true",pod=~"api-.*"}) < 1',
+        f'sum(kube_pod_status_ready{{condition="true",pod=~"api-.*",namespace="{NAMESPACE}"}}) < 1',
         "recuperar_pod.sh",
         usa_k8s=True,
+        sana=f'sum(kube_pod_status_ready{{condition="true",pod=~"api-.*",namespace="{NAMESPACE}"}})'
+        " >= 1",
     ),
     "disco_lleno": Escenario(
         "DiskUsageHigh",
@@ -73,6 +93,8 @@ ESCENARIOS: dict[str, Escenario] = {
         '100 * max(1 - node_filesystem_avail_bytes{service="billing",mountpoint="/data"}'
         ' / node_filesystem_size_bytes{service="billing",mountpoint="/data"}) > 85',
         "recuperar_disco.sh",
+        sana='100 * max(1 - node_filesystem_avail_bytes{service="billing",mountpoint="/data"}'
+        ' / node_filesystem_size_bytes{service="billing",mountpoint="/data"}) <= 85',
     ),
     # Consumidor SIMULADO en k3d (k8s-lab/workload-queue-consumer.yaml): restart_consumer
     # lo arregla de verdad, como a checkout. No es un RabbitMQ real: se declara en la tesis.
@@ -83,6 +105,7 @@ ESCENARIOS: dict[str, Escenario] = {
         'max(rabbitmq_queue_consumers{queue="worker"}) < 1',
         "recuperar_cola.sh",
         usa_k8s=True,
+        sana='max(rabbitmq_queue_consumers{queue="worker"}) >= 1',
     ),
     # Sin accion autorizada: escala por diseno. La falla (cert de 3 dias) ya esta presente.
     "certificado_por_vencer": Escenario(
@@ -90,6 +113,7 @@ ESCENARIOS: dict[str, Escenario] = {
         "gateway",
         "certificado_por_vencer.sh",
         '(min(probe_ssl_earliest_cert_expiry{service="gateway"}) - time()) / 86400 < 14',
+        sana='(min(probe_ssl_earliest_cert_expiry{service="gateway"}) - time()) / 86400 >= 14',
     ),
 }
 
@@ -130,11 +154,23 @@ COLUMNAS = [
     "verificado",
     "acciones",
     "acciones_nombres",
+    "acciones_servicios",
+    "otros_afectados",
+    "causa",
     "disparada_en",
     "inicio_atencion",
     "deteccion_s",
+    "semilla",
+    "t0",
+    "t1",
+    "t2",
+    "t3",
+    "t4",
+    "t5",
+    "escalado_en",
     "cerrado_en",
     "mttr_s",
+    "cierre_interno_s",
     "tokens_entrada",
     "tokens_salida",
     "turnos_llm",
@@ -187,6 +223,103 @@ def _esperar(condicion: str, timeout: float, cumplida: bool = True) -> bool:
     return False
 
 
+class VerificadorExterno(threading.Thread):
+    """t5 de la tesis: externo al agente y al operador, misma senal sana en todas las
+    condiciones. Corre en paralelo a la atencion y deja de leer al encontrar la recuperacion."""
+
+    def __init__(self, sana: str, intervalo_s: float = 3.0) -> None:
+        super().__init__(daemon=True)
+        self._sana = sana
+        self._intervalo = intervalo_s
+        self._parar = threading.Event()
+        self._seguidas = 0
+        self._primera: float | None = None
+        self.t5: float | None = None
+
+    def registrar(self, sana: bool | None, ts: float) -> None:
+        """Una lectura: `None` (Prometheus no respondio) no suma ni corta la racha."""
+        if sana is None:
+            return
+        if not sana:
+            self._seguidas, self._primera = 0, None
+            return
+        self._seguidas += 1
+        self._primera = self._primera if self._primera is not None else ts
+        if self._seguidas >= LECTURAS_SANAS:
+            self.t5 = self._primera
+
+    def run(self) -> None:
+        while self.t5 is None and not self._parar.wait(self._intervalo):
+            self.registrar(_prom(self._sana), time.time())
+
+    def esperar(self, limite: float) -> float | None:
+        """Espera la recuperacion hasta `limite` (epoch) y deja de leer."""
+        while self.t5 is None and self.is_alive() and time.time() < limite:
+            time.sleep(1)
+        self._parar.set()
+        return self.t5
+
+
+def esperar_estable(sana: str, ventana_s: float = ESTABILIDAD_S, limite_s: float = 300.0) -> bool:
+    """Tesis, 6.6: ventana de estabilidad con el servicio sano. Si se cae, la cuenta reinicia."""
+    fin = time.time() + limite_s
+    desde = time.time()
+    while time.time() < fin:
+        if _prom(sana) is not True:
+            desde = time.time()
+        elif time.time() - desde >= ventana_s:
+            return True
+        time.sleep(3)
+    return False
+
+
+def plan_corridas(
+    categorias: Sequence[str],
+    variantes: Sequence[str],
+    repeticiones: int,
+    semilla: int,
+    repeticiones_variante: int = REPETICIONES_VARIANTE,
+) -> list[tuple[int, str]]:
+    """Intercalado y sorteado (tesis, 6.6): cada bloque tiene una corrida de cada escenario, en
+    un orden sorteado con la semilla. La misma semilla da el mismo orden."""
+    rng = random.Random(semilla)  # noqa: S311  # no es criptografia: reproducibilidad
+    plan: list[tuple[int, str]] = []
+    for n in range(1, max(repeticiones, repeticiones_variante if variantes else 0) + 1):
+        bloque = list(categorias) if n <= repeticiones else []
+        bloque += list(variantes) if n <= repeticiones_variante else []
+        rng.shuffle(bloque)
+        plan += [(n, clave) for clave in bloque]
+    return plan
+
+
+def validar_namespace(namespace: str, permitidos: str, etiqueta: str | None) -> None:
+    """Se niega a inyectar fuera de un namespace de pruebas declarado (EXP_NAMESPACES_PERMITIDOS)
+    y etiquetado `aiops-experimento=true` en el cluster."""
+    if namespace not in {p.strip() for p in permitidos.split(",") if p.strip()}:
+        raise SystemExit(
+            f"Namespace {namespace!r} no declarado en EXP_NAMESPACES_PERMITIDOS: no se inyecta"
+        )
+    if etiqueta != "true":
+        raise SystemExit(
+            f"El namespace {namespace!r} no tiene la etiqueta {ETIQUETA_NAMESPACE}=true: "
+            "tiene que ser un namespace dedicado a las pruebas"
+        )
+
+
+def _etiqueta_namespace() -> str:
+    return _sh(
+        [
+            "kubectl",
+            "get",
+            "namespace",
+            NAMESPACE,
+            "-o",
+            f"jsonpath={{.metadata.labels.{ETIQUETA_NAMESPACE}}}",
+        ],
+        timeout=40,
+    ).stdout.strip()
+
+
 def _token_api() -> str:
     if tok := os.environ.get("AIOPS_API_TOKEN"):
         return tok.split(",")[0].strip()
@@ -203,6 +336,13 @@ def _incidente(inc_id: str) -> dict[str, object]:
     )
     with urllib.request.urlopen(req, timeout=30) as r:  # noqa: S310
         return dict(json.load(r))
+
+
+def _api_k8s() -> str:
+    """API de Kubernetes como la ve el worker: EXP_K8S_API, o el puerto que publica k3d."""
+    if K8S_API:
+        return K8S_API
+    return f"https://host.docker.internal:{_puerto_k8s()}"
 
 
 def _puerto_k8s() -> str:
@@ -238,8 +378,8 @@ CONFIG_RAG = {"AIOPS_RAG_K": "3", "AIOPS_RAG_MIN_SIM": "0.69"}
 RAG = "1"
 
 
-def _env_ciclo(nivel: int, puerto: str) -> list[str]:
-    env = {
+def entorno_ciclo(nivel: int, api_k8s: str, modo: str = "llm") -> dict[str, str]:
+    return {
         "AIOPS_BACKEND": "prometheus",
         "AIOPS_PROMETHEUS_URL": "http://prometheus:9090",
         # Logs (k8s-lab/promtail.yaml): explicito como Prometheus, para no depender de
@@ -249,7 +389,10 @@ def _env_ciclo(nivel: int, puerto: str) -> list[str]:
         # contenedor si trae el webhook; aca se vacia a proposito.
         "AIOPS_GCHAT_WEBHOOK_URL": "",
         "AIOPS_ACTIONS": "k8s",
-        "AIOPS_K8S_API": f"https://host.docker.internal:{puerto}",
+        "AIOPS_K8S_API": api_k8s,
+        "AIOPS_K8S_NAMESPACE": NAMESPACE,
+        "AIOPS_PROM_NAMESPACE": NAMESPACE,
+        "AIOPS_ATENDEDOR": "reglas" if modo == "reglas" else "agente",
         "AIOPS_K8S_TOKEN_FILE": "k8s-lab/.secrets/token",
         "AIOPS_K8S_CA_FILE": "k8s-lab/.secrets/ca.crt",
         "AIOPS_AUTONOMY_LEVEL": str(nivel),
@@ -265,6 +408,10 @@ def _env_ciclo(nivel: int, puerto: str) -> list[str]:
         **CONFIG_RAG,
         "AIOPS_RAG": RAG,
     }
+
+
+def _env_ciclo(nivel: int, api_k8s: str, modo: str = "llm") -> list[str]:
+    env = entorno_ciclo(nivel, api_k8s, modo)
     return [a for k, v in env.items() for a in ("-e", f"{k}={v}")]
 
 
@@ -338,7 +485,7 @@ def esperar_camino_real(
     esc: Escenario,
     disparo: float,
     espera_apertura_s: float = 120.0,
-    espera_cierre_s: float = 900.0,
+    espera_cierre_s: float = VENTANA_SEGUIMIENTO_S,
     espera_costo_s: float = 60.0,
 ) -> tuple[str | None, str]:
     """Camino real: Grafana dispara la alerta, el webhook encola y el worker atiende. Espera
@@ -370,7 +517,7 @@ def esperar_camino_real(
 
 
 @contextmanager
-def worker_de_laboratorio(nivel: int, puerto: str) -> Iterator[None]:
+def worker_de_laboratorio(nivel: int, api_k8s: str, modo: str = "llm") -> Iterator[None]:
     """Camino real: atiende el worker, no `scripts.lab_ciclo`. El worker del compose no trae
     el entorno del laboratorio (Prometheus, Kubernetes, nivel de autonomia), asi que se baja
     ese y se levanta uno con el MISMO entorno que usa el modo directo. Al terminar se
@@ -379,7 +526,16 @@ def worker_de_laboratorio(nivel: int, puerto: str) -> Iterator[None]:
     _sh(["docker", "compose", "stop", "worker"])
     _sh(["docker", "rm", "-f", nombre])
     r = _sh(
-        ["docker", "compose", "run", "-d", "--name", nombre, *_env_ciclo(nivel, puerto), "worker"]
+        [
+            "docker",
+            "compose",
+            "run",
+            "-d",
+            "--name",
+            nombre,
+            *_env_ciclo(nivel, api_k8s, modo),
+            "worker",
+        ]
     )
     if r.returncode != 0:
         _sh(["docker", "compose", "start", "worker"])
@@ -403,9 +559,10 @@ def correr(
     n: int,
     modo: str,
     nivel: int,
-    puerto: str,
+    api_k8s: str,
     fase: str = "ajuste",
     via: str = "directo",
+    semilla: int | None = None,
 ) -> dict[str, object]:
     esc = {**ESCENARIOS, **VARIANTES}[clave]
     cat, _, variante = clave.partition("/")
@@ -421,6 +578,7 @@ def correr(
         via=via,
         categoria_esperada=cat,
         variante=variante,
+        semilla="" if semilla is None else semilla,
         alertname=esc.alertname,
         servicio=esc.servicio,
     )
@@ -431,27 +589,33 @@ def correr(
         return fila
 
     if esc.usa_k8s and not _k8s_sano():
-        return fallo("infra: API server de k3d no responde")
+        return fallo("infra: API server de Kubernetes no responde")
     # (1) partir de sano: si la falla anterior quedo, recuperar primero
     if esc.recuperar and _prom(esc.anomalia):
         _sh(["sh", f"scripts/fallas/{esc.recuperar}"], reintentos=3)
         if not _esperar(esc.anomalia, 240, cumplida=False):
             return fallo("infra: el servicio no volvio a sano antes de la corrida")
+    if esc.recuperar and not esperar_estable(esc.sana):
+        return fallo("infra: el servicio no se mantuvo sano antes de la corrida")
     if via == "webhook" and not esperar_alerta_inactiva(esc.alertname):
         return fallo("infra: la alerta de Grafana no volvio a Normal antes de la corrida")
     # (2) inyectar y (3) esperar la anomalia
+    fila["t0"] = f"{time.time():.3f}"
     r = _sh(["sh", f"scripts/fallas/{esc.falla}"], reintentos=3)
     if r.returncode != 0:
         return fallo(f"infra: no se pudo inyectar la falla: {r.stderr.strip()[-200:]}")
     if not _esperar(esc.anomalia, 180):
         return fallo("infra: la falla no se manifesto en Prometheus")
     disparo = time.time()
-    fila["disparada_en"] = f"{disparo:.3f}"
+    fila["t1"] = f"{disparo:.3f}"
+    verificador = VerificadorExterno(esc.sana)
+    verificador.start()
     # (4) atender
     if via == "webhook":
         # camino real: Grafana dispara la alerta, el webhook encola y el worker atiende
         incidente_id, motivo = esperar_camino_real(esc, disparo)
         if incidente_id is None:
+            verificador.esperar(0)
             if esc.recuperar:  # no dejar la falla puesta para la corrida siguiente
                 _sh(["sh", f"scripts/fallas/{esc.recuperar}"], reintentos=3)
             return fallo(motivo)
@@ -466,7 +630,7 @@ def correr(
                 "compose",
                 "exec",
                 "-T",
-                *_env_ciclo(nivel, puerto),
+                *_env_ciclo(nivel, api_k8s, modo),
                 "api",
                 "uv",
                 "run",
@@ -480,10 +644,11 @@ def correr(
                 "--disparada-en",
                 f"{disparo:.3f}",
             ],
-            timeout=1200,
+            timeout=VENTANA_SEGUIMIENTO_S,
         )
         m = re.search(r"^RESULTADO (\{.*\})$", r.stdout, re.MULTILINE)
         if not m:
+            verificador.esperar(0)
             return fallo(f"el ciclo no termino: {(r.stderr or r.stdout).strip()[-300:]}")
         resultado = json.loads(m.group(1))
         if resultado.get("error"):
@@ -503,6 +668,8 @@ def correr(
         acciones_nombres="|".join(
             f"{a['nombre']}:{'ok' if a['ok'] else 'fallo'}" for a in acciones
         ),
+        acciones_servicios="|".join(str(a.get("servicio", "")) for a in acciones),
+        causa=d.get("causa") or "",
         cerrado_en=d.get("cerrado_en") or "",
         tokens_entrada=d.get("tokens_entrada") or 0,
         tokens_salida=d.get("tokens_salida") or 0,
@@ -517,8 +684,12 @@ def correr(
     if via == "webhook":
         fila["inicio_atencion"] = f"{float(str(d['abierto_en'])):.3f}"
         fila["deteccion_s"] = f"{float(str(d['abierto_en'])) - disparo:.1f}"
-    if d.get("cerrado_en"):
-        fila["mttr_s"] = f"{float(d['cerrado_en']) - disparo:.1f}"  # type: ignore[arg-type]
+    fila.update(marcas_de_tiempo(d, disparo, via, verificador))
+    fila["otros_afectados"] = "|".join(
+        e.servicio
+        for e in ESCENARIOS.values()
+        if e.usa_k8s and e.servicio != esc.servicio and _prom(e.sana) is False
+    )
     print(
         f"  {d['estado']} autonomo={d.get('resuelto_autonomo')} mttr={fila['mttr_s'] or '-'}s"
         f" acciones={fila['acciones_nombres'] or '-'}"
@@ -529,6 +700,29 @@ def correr(
     if esc.recuperar and (variante or _prom(esc.anomalia)):
         _sh(["sh", f"scripts/fallas/{esc.recuperar}"], reintentos=3)
     return fila
+
+
+def marcas_de_tiempo(
+    d: dict[str, Any], t1: float, via: str, verificador: VerificadorExterno
+) -> dict[str, str]:
+    """t2-t5 del incidente ya terminado. Por la via directa no hay alerta de Grafana: t2 = t1,
+    y por eso `--fase final` exige el camino real."""
+    t2 = float(d["disparada_en"]) if via == "webhook" and d.get("disparada_en") else t1
+    espera = VENTANA_SEGUIMIENTO_S if d.get("estado") == "resuelto" else GRACIA_ESCALADO_S
+    t5 = verificador.esperar(min(time.time() + espera, t2 + VENTANA_SEGUIMIENTO_S))
+    acciones = [float(a["ts"]) for a in d.get("acciones") or [] if a.get("ts")]
+    escalados = [float(e["ts"]) for e in d.get("linea_de_tiempo") or [] if e["tipo"] == "escalado"]
+    cerrado = d.get("cerrado_en")
+    return {
+        "disparada_en": f"{t2:.3f}",
+        "t2": f"{t2:.3f}",
+        "t3": f"{float(d['abierto_en']):.3f}" if d.get("abierto_en") else "",
+        "t4": f"{min(acciones):.3f}" if acciones else "",
+        "t5": f"{t5:.3f}" if t5 is not None else "",
+        "escalado_en": f"{min(escalados):.3f}" if escalados else "",
+        "mttr_s": f"{t5 - t2:.1f}" if t5 is not None else "",
+        "cierre_interno_s": f"{float(cerrado) - t2:.1f}" if cerrado else "",
+    }
 
 
 def _git_salida(*args: str) -> str:
@@ -574,7 +768,23 @@ def main() -> int:
         choices=(1, 3, 4),
         help="2 no: con LLM la pausa de aprobacion no reanuda el grafo (ver plan)",
     )
-    p.add_argument("--modo", choices=("script", "llm"), default="script")
+    p.add_argument(
+        "--modo",
+        choices=("script", "reglas", "llm"),
+        default="script",
+        help="script: plomeria. reglas: el comparador de la tesis (6.1), sin LLM. llm: el agente",
+    )
+    p.add_argument(
+        "--semilla",
+        type=int,
+        default=None,
+        help="sorteo del orden de las corridas; queda en el CSV. Sin ella se elige una al azar",
+    )
+    p.add_argument(
+        "--imprimir-entorno",
+        action="store_true",
+        help="imprime el entorno que debe tener un worker externo (EXP_WORKER_EXTERNO=1) y sale",
+    )
     p.add_argument("--salida", required=True)
     p.add_argument(
         "--fase",
@@ -604,8 +814,14 @@ def main() -> int:
     args = p.parse_args()
     global RAG
     RAG = "0" if args.sin_rag else "1"
+    if args.imprimir_entorno:
+        for k, v in entorno_ciclo(args.nivel, K8S_API or "<EXP_K8S_API>", args.modo).items():
+            print(f"{k}={v}")
+        return 0
     if args.fase == "final":
         exigir_congelado()
+        if args.via != "webhook":
+            raise SystemExit("--fase final exige --via webhook: t2 es la alerta de Grafana (6.5)")
 
     cats = [c.strip() for c in args.categorias.split(",") if c.strip()]
     if desconocidas := [c for c in cats if c not in ESCENARIOS]:
@@ -614,11 +830,19 @@ def main() -> int:
         if cats != ["servicio_detenido"]:
             raise SystemExit("--inyeccion solo aplica a --categorias servicio_detenido")
         _ENV_SUB["INYECTAR_LOG"] = "1"
-    if args.via == "webhook" and args.modo != "llm":
-        raise SystemExit("--via webhook solo con --modo llm: el modo script invoca el ciclo")
+    if args.via == "webhook" and args.modo == "script":
+        raise SystemExit("--via webhook no admite --modo script: invoca el ciclo directamente")
+    if WORKER_EXTERNO and args.via != "webhook":
+        raise SystemExit("EXP_WORKER_EXTERNO=1 solo con --via webhook: la via directa usa Docker")
+    validar_namespace(NAMESPACE, NAMESPACES_PERMITIDOS, _etiqueta_namespace())
     if _prom("up") is None:
         raise SystemExit(f"Prometheus no responde en {PROMETHEUS}: levantar el laboratorio")
-    puerto = _puerto_k8s()
+    api_k8s = K8S_API if WORKER_EXTERNO else _api_k8s()
+    semilla = random.SystemRandom().randrange(2**31) if args.semilla is None else args.semilla
+    plan = plan_corridas(
+        cats, list(VARIANTES) if args.variantes else [], args.repeticiones, semilla
+    )
+    print(f"Semilla del orden: {semilla}")
 
     salida = Path(args.salida)
     salida.parent.mkdir(parents=True, exist_ok=True)
@@ -627,25 +851,17 @@ def main() -> int:
         w = csv.DictWriter(f, fieldnames=COLUMNAS)
         if nuevo:
             w.writeheader()
+        camino_real = args.via == "webhook" and not WORKER_EXTERNO
         contexto = (
-            worker_de_laboratorio(args.nivel, puerto) if args.via == "webhook" else nullcontext()
+            worker_de_laboratorio(args.nivel, api_k8s, args.modo) if camino_real else nullcontext()
         )
         with contexto:
-            for n in range(1, args.repeticiones + 1):
-                for cat in cats:  # intercalado: una categoria lenta no concentra sus corridas
-                    print(
-                        f"[{n}/{args.repeticiones}] {cat} "
-                        f"(modo {args.modo}, nivel {args.nivel}, via {args.via})"
-                    )
-                    w.writerow(correr(cat, n, args.modo, args.nivel, puerto, args.fase, args.via))
-                    f.flush()  # una corrida cortada no pierde las anteriores
-                if args.variantes and n <= REPETICIONES_VARIANTE:
-                    for clave in VARIANTES:
-                        print(f"[{n}/{REPETICIONES_VARIANTE}] {clave}")
-                        w.writerow(
-                            correr(clave, n, args.modo, args.nivel, puerto, args.fase, args.via)
-                        )
-                        f.flush()
+            for i, (n, clave) in enumerate(plan, 1):
+                print(f"[{i}/{len(plan)}] {clave} (modo {args.modo}, nivel {args.nivel})")
+                w.writerow(
+                    correr(clave, n, args.modo, args.nivel, api_k8s, args.fase, args.via, semilla)
+                )
+                f.flush()  # una corrida cortada no pierde las anteriores
     print(f"Listo: {salida}")
     return 0
 

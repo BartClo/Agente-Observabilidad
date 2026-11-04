@@ -142,6 +142,19 @@ def _preparar_correr(monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
     monkeypatch.setattr(experimento, "_esperar", lambda *a, **k: True)
     monkeypatch.setattr(experimento, "esperar_alerta_inactiva", lambda alertname: True)
     monkeypatch.setattr(time, "time", lambda: 1000.0)
+    monkeypatch.setattr(experimento, "esperar_estable", lambda sana: True)
+
+    class VerificadorFalso:
+        def __init__(self, sana: str) -> None:
+            pass
+
+        def start(self) -> None:
+            pass
+
+        def esperar(self, limite: float) -> float:
+            return 1040.0
+
+    monkeypatch.setattr(experimento, "VerificadorExterno", VerificadorFalso)
     return llamadas
 
 
@@ -242,3 +255,86 @@ def test_esperar_alerta_inactiva_espera_la_transicion_a_normal(
     assert experimento.esperar_alerta_inactiva("PodFailed")
     monkeypatch.setattr(experimento, "_alerta_en_alerting", lambda a: True)
     assert not experimento.esperar_alerta_inactiva("PodFailed", timeout_s=0.0)
+
+
+def test_t5_exige_lecturas_sanas_seguidas_y_toma_la_primera() -> None:
+    v = experimento.VerificadorExterno("x")
+    v.registrar(True, 10.0)
+    assert v.t5 is None  # un parpadeo no es una recuperacion
+    v.registrar(False, 13.0)
+    v.registrar(True, 16.0)
+    v.registrar(None, 19.0)  # Prometheus no respondio: no corta la racha
+    v.registrar(True, 22.0)
+    assert v.t5 == 16.0
+
+
+def test_la_senal_sana_no_es_la_ausencia_de_anomalia() -> None:
+    for esc in {**experimento.ESCENARIOS, **experimento.VARIANTES}.values():
+        assert esc.sana and esc.sana != esc.anomalia
+        assert ">=" in esc.sana or "<=" in esc.sana
+
+
+def test_estabilidad_reinicia_si_el_servicio_se_cae(monkeypatch: pytest.MonkeyPatch) -> None:
+    ahora = {"t": 0.0}
+    monkeypatch.setattr(time, "time", lambda: ahora["t"])
+    monkeypatch.setattr(time, "sleep", lambda s: ahora.update(t=ahora["t"] + s))
+    monkeypatch.setattr(experimento, "_prom", lambda q: not 30 <= ahora["t"] < 40)
+    assert experimento.esperar_estable("x", ventana_s=60, limite_s=300)
+    assert ahora["t"] >= 90  # la caida a los 30 s reinicio la cuenta
+
+
+def test_marcas_de_tiempo_del_camino_real(monkeypatch: pytest.MonkeyPatch) -> None:
+    v = experimento.VerificadorExterno("x")
+    v.t5 = 190.0
+    d = {
+        "estado": "resuelto",
+        "disparada_en": 100.0,
+        "abierto_en": 120.0,
+        "cerrado_en": 200.0,
+        "acciones": [{"ts": 150.0}],
+        "linea_de_tiempo": [],
+    }
+    m = experimento.marcas_de_tiempo(d, 90.0, "webhook", v)
+    assert (m["t2"], m["t3"], m["t4"], m["t5"]) == ("100.000", "120.000", "150.000", "190.000")
+    assert m["mttr_s"] == "90.0" and m["cierre_interno_s"] == "100.0"
+
+
+def test_escalado_sin_recuperacion_no_tiene_mttr_y_registra_el_escalamiento(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    v = experimento.VerificadorExterno("x")
+    monkeypatch.setattr(v, "esperar", lambda limite: None)
+    d = {
+        "estado": "escalado",
+        "disparada_en": 100.0,
+        "linea_de_tiempo": [{"tipo": "escalado", "ts": 130.0, "datos": {}}],
+    }
+    m = experimento.marcas_de_tiempo(d, 90.0, "webhook", v)
+    assert m["mttr_s"] == "" and m["t5"] == "" and m["escalado_en"] == "130.000"
+
+
+def test_plan_sorteado_intercalado_y_reproducible() -> None:
+    cats, vars_ = ["a", "b", "c"], ["a/x", "b/y"]
+    plan = experimento.plan_corridas(cats, vars_, 5, 42)
+    assert plan == experimento.plan_corridas(cats, vars_, 5, 42)
+    assert plan != experimento.plan_corridas(cats, vars_, 5, 43)
+    assert sum(c == "a" for _, c in plan) == 5 and sum(c == "a/x" for _, c in plan) == 3
+    for n in range(1, 6):  # cada bloque tiene cada escenario una vez
+        bloque = [c for m, c in plan if m == n]
+        assert len(bloque) == len(set(bloque))
+    assert len(experimento.plan_corridas([], vars_, 1, 1)) == 6  # solo variantes
+
+
+def test_no_inyecta_fuera_de_un_namespace_declarado_y_etiquetado() -> None:
+    experimento.validar_namespace("pruebas", "aiops-lab, pruebas", "true")
+    with pytest.raises(SystemExit, match="no declarado"):
+        experimento.validar_namespace("produccion", "pruebas", "true")
+    with pytest.raises(SystemExit, match="etiqueta"):
+        experimento.validar_namespace("pruebas", "pruebas", "")
+
+
+def test_entorno_del_worker_trae_namespace_y_atendedor() -> None:
+    env = experimento.entorno_ciclo(3, "https://k8s", "reglas")
+    assert env["AIOPS_ATENDEDOR"] == "reglas" and env["AIOPS_K8S_API"] == "https://k8s"
+    assert env["AIOPS_K8S_NAMESPACE"] == experimento.NAMESPACE
+    assert env["AIOPS_BREAKER_MAX"] == "0"  # el aislamiento tambien para un worker externo

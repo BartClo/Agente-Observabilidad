@@ -27,6 +27,7 @@ from domain.aiops_core.catalogo import categoria_para_alerta
 from domain.aiops_core.ciclo import Ciclo
 from domain.aiops_core.modelos import Alerta, Severidad
 from domain.aiops_core.politicas import Veredicto
+from domain.aiops_core.reglas import atender_con_reglas
 
 
 def _atender_script(ciclo: Ciclo, inc_id: str, alertname: str) -> None:
@@ -80,7 +81,7 @@ def main(argv: list[str]) -> int:
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     p.add_argument("alertname")
     p.add_argument("servicio")
-    p.add_argument("--modo", choices=("script", "llm"), default="script")
+    p.add_argument("--modo", choices=("script", "reglas", "llm"), default="script")
     p.add_argument(
         "--disparada-en",
         type=float,
@@ -110,6 +111,9 @@ def main(argv: list[str]) -> int:
             from agents.aiops.worker_jobs import atender_con_agente
 
             atender_con_agente(ciclo, inc.id, alerta)
+        elif args.modo == "reglas":
+            atender_con_reglas(ciclo, inc.id)
+            ciclo.registrar_costo_llm(inc.id, entrada=0, salida=0, modelo="reglas")
         else:
             _atender_script(ciclo, inc.id, args.alertname)
     except Exception as exc:  # el experimento registra el fallo y sigue con la proxima corrida

@@ -32,7 +32,7 @@ CONSULTAS_POR_DEFECTO: dict[str, str] = {
         '100 * max(1 - node_filesystem_avail_bytes{{{l}="{s}",mountpoint="{m}"}}'
         ' / node_filesystem_size_bytes{{{l}="{s}",mountpoint="{m}"}})'
     ),
-    "pod_ready": 'sum(kube_pod_status_ready{{condition="true",pod=~"{s}-.*"}})',
+    "pod_ready": 'sum(kube_pod_status_ready{{condition="true",pod=~"{s}-.*"{n}}})',
     "queue_consumers_active": 'sum(rabbitmq_queue_consumers{{queue="{s}"}})',
     "cert_days_remaining": ('(min(probe_ssl_earliest_cert_expiry{{{l}="{s}"}}) - time()) / 86400'),
 }
@@ -102,7 +102,14 @@ class PrometheusLoki:
         plantilla = self._consultas.get(nombre)
         if plantilla is None:
             return None
-        query = plantilla.format(s=validar_servicio(servicio), l=self._etiqueta, m=self._mountpoint)
+        # En un cluster compartido, `api-.*` tambien calza pods de otros namespaces.
+        ns = os.environ.get("AIOPS_PROM_NAMESPACE", "")
+        query = plantilla.format(
+            s=validar_servicio(servicio),
+            l=self._etiqueta,
+            m=self._mountpoint,
+            n=f',namespace="{ns}"' if ns else "",
+        )
         url = f"{self._prom}/api/v1/query?" + urllib.parse.urlencode({"query": query})
         resultado = self._get(url).get("data", {}).get("result", [])
         if not resultado:

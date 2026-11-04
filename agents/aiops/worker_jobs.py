@@ -25,6 +25,7 @@ from langchain_core.callbacks import BaseCallbackHandler
 from agents.aiops import runtime
 from domain.aiops_core.ciclo import Ciclo
 from domain.aiops_core.modelos import Alerta, Estado, Severidad
+from domain.aiops_core.reglas import atender_con_reglas
 
 logger = logging.getLogger(__name__)
 
@@ -86,7 +87,11 @@ def procesar_alerta_webhook(alerta_dict: dict[str, Any], es_firing: bool) -> str
 
     with bloqueo_servicio(alerta.servicio):
         inc = ciclo.abrir_desde_alerta(alerta)
-        atender_con_agente(ciclo, inc.id, alerta)
+        if os.environ.get("AIOPS_ATENDEDOR") == "reglas":  # comparador del experimento (6.1)
+            atender_con_reglas(ciclo, inc.id)
+            ciclo.registrar_costo_llm(inc.id, entrada=0, salida=0, modelo="reglas")
+        else:
+            atender_con_agente(ciclo, inc.id, alerta)
     return f"{inc.id} procesado por el agente"
 
 

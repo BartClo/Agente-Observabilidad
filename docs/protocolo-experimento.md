@@ -92,6 +92,55 @@ hace atender el incidente y lee el resultado de la API. Las corridas se intercal
 categorías. El CSV se escribe fila por fila: si se corta, se retoma con el mismo
 `--salida` (agrega filas).
 
+### Rigor de las corridas (tesis, 6.5 y 6.6)
+
+- `--semilla N` sortea el orden dentro de cada bloque y queda en el CSV. Sin ella se elige una
+  y se imprime. `--variantes` agrega las 4 variantes confusoras, 3 veces cada una.
+- Antes de cada corrida el servicio tiene que estar sano 60 s seguidos.
+- Marcas `t0`–`t5`. `t5` lo pone un verificador externo que consulta la señal **sana** y exige
+  dos lecturas seguidas. `mttr_s` es t5 − t2; el cierre del agente va en `cierre_interno_s`.
+- Sin recuperación en 15 min desde t2, `t5` queda vacío: el caso cuenta como no resuelto.
+- `--fase final` exige `--via webhook`, porque t2 es la alerta de Grafana.
+- Brazos: `--modo llm --nivel 3` (principal), `--modo llm --nivel 1`, `--modo llm --sin-rag` y
+  `--modo reglas` (comparador, sin LLM).
+
+### Apuntar a un clúster real
+
+**Solo en un namespace dedicado a las pruebas.** Las fallas se inyectan de verdad: nunca en un
+namespace con servicios en uso. El runner y los scripts se niegan si el namespace no está en
+`EXP_NAMESPACES_PERMITIDOS`, y el runner además exige la etiqueta `aiops-experimento=true`.
+
+1. Crear el namespace y desplegar los workloads del laboratorio:
+
+   ```bash
+   export EXP_NAMESPACE=aiops-pruebas EXP_NAMESPACES_PERMITIDOS=aiops-pruebas
+   kubectl create namespace "$EXP_NAMESPACE"
+   kubectl label namespace "$EXP_NAMESPACE" aiops-experimento=true
+   sed "s/aiops-lab/$EXP_NAMESPACE/g" k8s-lab/workload-*.yaml k8s-lab/rbac-aiops.yaml \
+     | kubectl apply -f -
+   ```
+
+   Los `NodePort` fijos de los manifiestos pueden chocar con los del clúster: revisarlos.
+2. Que Prometheus entregue las métricas con las etiquetas que usan las consultas
+   (`up{service="checkout"}`, `rabbitmq_queue_consumers{queue="worker"}`,
+   `kube_pod_status_ready` con su `namespace`), que Loki reciba los logs y que Grafana tenga las
+   5 reglas de alerta con el webhook hacia la API.
+3. Desplegar API y worker con el entorno que imprime
+   `python scripts/experimento.py --imprimir-entorno --modo llm` (repetirlo con `--modo reglas`
+   para ese brazo). Incluye el aislamiento entre corridas y `AIOPS_PROM_NAMESPACE`.
+4. Correr desde una máquina con `kubectl` apuntando a ese clúster:
+
+   ```bash
+   EXP_WORKER_EXTERNO=1 EXP_K8S_API=https://... EXP_PROMETHEUS=https://... \
+   EXP_API=https://... EXP_GRAFANA=https://... AIOPS_API_TOKEN=... \
+   python scripts/experimento.py --modo llm --via webhook --variantes --semilla 2026 \
+     --categorias servicio_detenido,pod_fallido,cola_detenida --salida resultados/real.csv
+   ```
+
+`disco_lleno` y `certificado_por_vencer` inyectan con `docker compose`: no corren en un clúster
+real tal como están. Quitarlas de `--categorias` cambia el denominador de la TRA y hay que
+declararlo. Los workloads siguen siendo los del laboratorio: el entorno cambia, los servicios no.
+
 ## 4. Analizar
 
 ```bash
