@@ -17,7 +17,15 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
-from scripts.experimento import AISLAMIENTO, CONFIG_RAG, RAG
+from domain.aiops_core.evaluacion import REDUCCION_MTTR_MINIMA, TRA_MINIMA
+from scripts.experimento import (
+    AISLAMIENTO,
+    CONFIG_RAG,
+    ESTABILIDAD_S,
+    RAG,
+    REPETICIONES_VARIANTE,
+    VENTANA_SEGUIMIENTO_S,
+)
 
 RAIZ = Path(__file__).resolve().parent.parent
 API = os.environ.get("EXP_API", "http://localhost:8010")
@@ -81,6 +89,16 @@ def construir_registro() -> dict[str, object]:
         "aislamiento_entre_corridas": dict(AISLAMIENTO),
         "prompt_sha256": _sha256(RAIZ / "agents" / "aiops" / "prompt.md"),
         "runbooks_sha256": _sha256(*(RAIZ / "agents" / "aiops" / "runbooks").glob("RB-*.md")),
+        # Fijados antes de las corridas (tesis, 6.6): reglas de analisis y rubrica de diagnostico.
+        "rubrica_sha256": _sha256(RAIZ / "docs" / "rubrica-diagnostico.md"),
+        "evaluacion_sha256": _sha256(RAIZ / "domain" / "aiops_core" / "evaluacion.py"),
+        "criterios": {
+            "tra_minima": TRA_MINIMA,
+            "reduccion_mttr_minima": REDUCCION_MTTR_MINIMA,
+            "ventana_seguimiento_s": VENTANA_SEGUIMIENTO_S,
+            "estabilidad_s": ESTABILIDAD_S,
+            "repeticiones_variante": REPETICIONES_VARIANTE,
+        },
         # Base de conocimiento: el corpus versionado (lo unico que entra en lo medido), el
         # modelo de embeddings y los parametros de busqueda. Cambiar un documento cambia el hash.
         "rag": {

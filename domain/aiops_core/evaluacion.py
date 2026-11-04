@@ -306,7 +306,8 @@ def indicadores_variantes(
     corridas: Sequence[Corrida], calificaciones: Mapping[str, Calificacion] | None = None
 ) -> IndicadoresVariantes:
     vs = [c for c in corridas if c.variante]
-    notas = [calificaciones[c.incidente] for c in vs if c.incidente in (calificaciones or {})]
+    calificadas = calificaciones or {}
+    notas = [calificadas[c.incidente] for c in vs if c.incidente in calificadas]
     n = len(vs) or 1
     tiempos = [
         t for c in vs if (t := c.mttr_s if c.mttr_s is not None else c.escalamiento_s) is not None

@@ -99,3 +99,14 @@ def test_el_registro_congela_el_rag_y_el_corpus(monkeypatch: pytest.MonkeyPatch)
     assert rag["activo"] == "1" and rag["embedding_modelo"] == "gemini-embedding-001"
     assert len(str(rag["corpus_sha256"])) == 64
     assert rag["config"]["AIOPS_RAG_ORIGENES"] == "repo"
+
+
+def test_el_registro_fija_la_rubrica_y_los_criterios(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(congelar, "_git", _git_falso())
+    monkeypatch.setattr(congelar, "_config_llm", lambda: CFG_OK)
+    registro = congelar.construir_registro()
+    assert len(str(registro["rubrica_sha256"])) == 64
+    assert len(str(registro["evaluacion_sha256"])) == 64
+    criterios = registro["criterios"]
+    assert isinstance(criterios, dict)
+    assert criterios["tra_minima"] == 30.0 and criterios["ventana_seguimiento_s"] == 900.0
