@@ -8,7 +8,7 @@ experimental. Una categoria sin `accion` es de solo deteccion y escalamiento.
 from __future__ import annotations
 
 import operator
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 
 _OPERADORES: dict[str, Callable[[float, float], bool]] = {
@@ -96,6 +96,21 @@ CATALOGO: dict[str, CategoriaL1] = {
         ),
     )
 }
+
+
+_POR_DEFECTO = tuple(CATALOGO.values())
+
+
+def activar_catalogo(categorias: Iterable[CategoriaL1]) -> None:
+    """Reemplaza el catalogo del proceso (perfil de ambiente). Se muta en el lugar porque hay
+    modulos que importaron `CATALOGO`."""
+    nuevas = {c.id: c for c in categorias}
+    CATALOGO.clear()
+    CATALOGO.update(nuevas)
+
+
+def restaurar_catalogo() -> None:
+    activar_catalogo(_POR_DEFECTO)
 
 
 def categoria_para_alerta(nombre_alerta: str) -> CategoriaL1 | None:

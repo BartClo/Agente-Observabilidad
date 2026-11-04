@@ -47,7 +47,9 @@ class PrometheusLoki:
         etiqueta_servicio: str = "service",
         mountpoint: str = "/",
         timeout_s: float = 10.0,
+        etiqueta_logs: str | None = None,
     ) -> None:
+        self._etiqueta_logs = etiqueta_logs or etiqueta_servicio
         self._prom = prometheus_url.rstrip("/")
         self._loki = loki_url.rstrip("/") if loki_url else None
         self._consultas = dict(consultas or CONSULTAS_POR_DEFECTO)
@@ -57,6 +59,18 @@ class PrometheusLoki:
 
     @classmethod
     def desde_entorno(cls) -> PrometheusLoki:
+        from infra import perfil as perfiles
+
+        perfil = perfiles.activo()
+        if perfil is not None:
+            return cls(
+                prometheus_url=os.environ["AIOPS_PROMETHEUS_URL"],
+                loki_url=os.environ.get("AIOPS_LOKI_URL") or None,
+                consultas={**CONSULTAS_POR_DEFECTO, **perfil.consultas},
+                etiqueta_servicio=perfil.etiqueta_servicio,
+                etiqueta_logs=perfil.etiqueta_logs,
+                mountpoint=perfil.mountpoint,
+            )
         return cls(
             prometheus_url=os.environ["AIOPS_PROMETHEUS_URL"],
             loki_url=os.environ.get("AIOPS_LOKI_URL") or None,
@@ -112,7 +126,7 @@ class PrometheusLoki:
     def logs(self, servicio: str, lineas: int, desde: float | None = None) -> list[str]:
         if self._loki is None:
             return []
-        query = f'{{{self._etiqueta}="{validar_servicio(servicio)}"}}'
+        query = f'{{{self._etiqueta_logs}="{validar_servicio(servicio)}"}}'
         params = urllib.parse.urlencode(
             {
                 "query": query,
