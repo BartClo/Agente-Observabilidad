@@ -30,7 +30,8 @@ from domain.aiops_core import metricas
 from domain.aiops_core.ciclo import ErrorCiclo
 from domain.aiops_core.modelos import Incidente
 from infra import kill_switch
-from infra.alertas_webhook import alerta_desde_grafana
+from infra import perfil as perfiles
+from infra.alertas_webhook import alerta_desde_grafana, alertas_con_perfil
 
 
 async def _reintentar_avisos() -> None:
@@ -116,6 +117,7 @@ def ui() -> HTMLResponse:
 
 
 @app.post("/webhooks/grafana", dependencies=_AUTENTICADO)
+@app.post("/webhooks/alertas", dependencies=_AUTENTICADO)
 def webhook_grafana(payload: dict[str, Any]) -> dict[str, Any]:
     """Contact point tipo webhook de Grafana: `payload["alerts"]` trae una o varias
     alertas (firing o resolved). Solo valida, parsea y encola -- nunca ejecuta el
@@ -127,8 +129,16 @@ def webhook_grafana(payload: dict[str, Any]) -> dict[str, Any]:
     etiqueta = os.environ.get("AIOPS_SERVICE_LABEL", "service")
     encolados: list[str] = []
     deduplicados: list[str] = []
-    for item in payload.get("alerts", []):
-        alerta, es_firing = alerta_desde_grafana(item, etiqueta)
+    perfil = perfiles.activo()
+    try:
+        alertas = (
+            alertas_con_perfil(payload, perfil)
+            if perfil is not None
+            else [alerta_desde_grafana(item, etiqueta) for item in payload.get("alerts", [])]
+        )
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    for alerta, es_firing in alertas:
         (encolados if encolar_alerta(alerta, es_firing) else deduplicados).append(alerta.id)
     return {"encolados": encolados, "deduplicados": deduplicados}
 

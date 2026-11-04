@@ -14,6 +14,7 @@ from typing import Any
 
 from domain.aiops_core.modelos import Alerta
 from infra.alertas_comun import parse_timestamp_iso, severidad_desde_label
+from infra.perfil import Perfil
 
 
 def alerta_desde_grafana(item: dict[str, Any], etiqueta_servicio: str) -> tuple[Alerta, bool]:
@@ -40,3 +41,50 @@ def alerta_desde_grafana(item: dict[str, Any], etiqueta_servicio: str) -> tuple[
         disparada_en=disparada_en,
     )
     return alerta, item.get("status", "firing") == "firing"
+
+
+def _campo(item: Any, ruta: str) -> Any:
+    valor = item
+    for parte in ruta.split("."):
+        valor = valor.get(parte) if isinstance(valor, dict) else None
+    return valor
+
+
+def _texto(valor: Any) -> str:
+    return valor.strip() if isinstance(valor, str) else ""
+
+
+def alertas_con_perfil(payload: dict[str, Any], perfil: Perfil) -> list[tuple[Alerta, bool]]:
+    """Webhook de un ambiente con perfil: los campos salen del mapeo. El entorno lo fija el
+    perfil, nunca el payload: quien pudiera enviar una alerta no debe poder decidir en que
+    entorno se autoriza la accion. `lista` vacia: el payload es una sola alerta."""
+    m = perfil.webhook
+    crudo = _campo(payload, m.lista) if m.lista else [payload]
+    if not isinstance(crudo, list):
+        raise ValueError(f"el payload no trae una lista en {m.lista!r}")
+    resultado: list[tuple[Alerta, bool]] = []
+    for item in crudo:
+        if not isinstance(item, dict):
+            raise ValueError("cada alerta debe ser un objeto")
+        ruta = m.servicio or f"labels.{perfil.etiqueta_servicio}"
+        servicio = _texto(_campo(item, ruta))
+        if not servicio and not m.servicio:
+            servicio = _texto(_campo(item, "labels.job"))
+        servicio = servicio or "desconocido"
+        nombre = _texto(_campo(item, m.nombre)) or "desconocida"
+        inicio = _texto(_campo(item, m.inicio))
+        huella = _texto(_campo(item, m.huella)) or inicio
+        crudo_sev = _texto(_campo(item, m.severidad))
+        severidad = m.severidades.get(crudo_sev.lower()) or severidad_desde_label(crudo_sev)
+        alerta = Alerta(
+            id=f"{nombre}:{servicio}" + (f":{huella}" if huella else ""),
+            nombre=nombre,
+            servicio=servicio,
+            entorno=perfil.entorno,
+            severidad=severidad,
+            resumen=_texto(_campo(item, m.resumen)),
+            disparada_en=parse_timestamp_iso(inicio),
+        )
+        estado = _texto(_campo(item, m.estado)) or m.valor_firing
+        resultado.append((alerta, estado == m.valor_firing))
+    return resultado
