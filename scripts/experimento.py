@@ -444,6 +444,12 @@ def buscar_incidente_nuevo(
 def _alerta_en_alerting(alertname: str) -> bool | None:
     """True si la regla de Grafana esta disparada o pendiente; False si esta en Normal;
     None si Grafana no responde o la regla no existe."""
+    estado = _estado_regla(alertname)
+    return None if estado is None else estado != "inactive"
+
+
+def _estado_regla(alertname: str) -> str | None:
+    """inactive, pending o firing; None si Grafana no responde o la regla no existe."""
     try:
         with urllib.request.urlopen(  # noqa: S310
             f"{GRAFANA}/api/prometheus/grafana/api/v1/rules", timeout=10
@@ -454,7 +460,7 @@ def _alerta_en_alerting(alertname: str) -> bool | None:
     for grupo in grupos:
         for regla in grupo["rules"]:
             if regla["name"] == alertname:
-                return bool(regla["state"] != "inactive")
+                return str(regla["state"])
     return None
 
 

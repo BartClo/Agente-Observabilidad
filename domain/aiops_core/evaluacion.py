@@ -7,10 +7,12 @@ Decisiones metodologicas (documentadas en docs/protocolo-experimento.md):
 - La ELEGIBILIDAD sale de la falla inyectada (verdad de campo), no de la clasificacion
   del agente. Si saliera del agente, uno que clasifica mal achicaria su propio
   denominador y la TRA saldria inflada.
-- Accion INCORRECTA: el agente ejecuto al menos una accion y, o bien clasifico otra
-  categoria que la inyectada, o bien el servicio no quedo verificado como recuperado.
-- El MTTR se mide del disparo de la alerta al cierre verificado, en el agente y en la
-  linea base (mismo inicio y fin), por categoria.
+- Cada corrida se clasifica segun la Tabla 15 de la tesis. Accion INCORRECTA: no autorizada,
+  sobre un destino incorrecto o que agrava el estado. Una accion autorizada que no recupera es
+  remediacion ineficaz (se reporta aparte) y abstenerse no es un error.
+- El MTTR se mide de t2 (alerta disparada) a t5 (recuperacion confirmada por el verificador
+  externo), igual en todas las condiciones, y se compara por escenario. Los CSV anteriores a
+  esas columnas usan el disparo y el cierre del agente.
 - Con pocas corridas no hay significancia estadistica: el contraste reporta valores y n,
   no un p-valor.
 """
@@ -20,7 +22,9 @@ from __future__ import annotations
 import math
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
+from enum import StrEnum
 
+from domain.aiops_core.acciones import ACCIONES_PERMITIDAS
 from domain.aiops_core.catalogo import CATALOGO
 from domain.aiops_core.metricas import reduccion_mttr
 
@@ -35,6 +39,26 @@ def _bool(v: str) -> bool:
 
 def _float(v: str) -> float | None:
     return float(v) if v.strip() not in ("", "None") else None
+
+
+def _lista(v: str | None) -> tuple[str, ...]:
+    return tuple(x for x in (v or "").split("|") if x)
+
+
+class ResultadoAccion(StrEnum):
+    """Tabla 15 de la tesis, mas CORRECTA: la tabla no nombra la accion que si recupera."""
+
+    NO_AUTORIZADA = "no_autorizada"
+    DESTINO_INCORRECTO = "destino_incorrecto"
+    AGRAVA = "agrava"
+    SIN_RECUPERACION = "sin_recuperacion"
+    ABSTENCION = "abstencion"
+    CORRECTA = "correcta"
+
+
+INCORRECTOS = frozenset(
+    {ResultadoAccion.NO_AUTORIZADA, ResultadoAccion.DESTINO_INCORRECTO, ResultadoAccion.AGRAVA}
+)
 
 
 @dataclass(frozen=True)
@@ -52,6 +76,15 @@ class Corrida:
     tokens: int = 0
     turnos: int = 0
     variante: str = ""  # variante confusora (tesis, Tabla 13); "" = falla limpia
+    incidente: str = ""
+    servicio: str = ""
+    nombres_acciones: tuple[str, ...] = ()
+    servicios_acciones: tuple[str, ...] = ()
+    otros_afectados: tuple[str, ...] = ()
+    t2: float | None = None
+    t5: float | None = None
+    escalado_en: float | None = None
+    llamadas_tools: int = 0
 
     @classmethod
     def desde_fila(cls, f: Mapping[str, str]) -> Corrida:
@@ -69,6 +102,15 @@ class Corrida:
             tokens=int(f.get("tokens_entrada") or 0) + int(f.get("tokens_salida") or 0),
             turnos=int(f.get("turnos_llm") or 0),
             variante=f.get("variante") or "",
+            incidente=f.get("incidente") or "",
+            servicio=f.get("servicio") or "",
+            nombres_acciones=tuple(a.split(":")[0] for a in _lista(f.get("acciones_nombres"))),
+            servicios_acciones=_lista(f.get("acciones_servicios")),
+            otros_afectados=_lista(f.get("otros_afectados")),
+            t2=_float(f.get("t2") or ""),
+            t5=_float(f.get("t5") or ""),
+            escalado_en=_float(f.get("escalado_en") or ""),
+            llamadas_tools=int(f.get("llamadas_tools") or 0),
         )
 
     @property
@@ -82,16 +124,57 @@ class Corrida:
         return self.estado == "resuelto" and self.verificado
 
     @property
+    def escenario(self) -> str:
+        return (
+            f"{self.categoria_esperada}/{self.variante}"
+            if self.variante
+            else (self.categoria_esperada)
+        )
+
+    @property
     def mttr_s(self) -> float | None:
+        """t2 -> t5. Sin t5 el caso no se recupero, aunque el agente lo haya cerrado."""
+        if self.t2 is not None:
+            return self.t5 - self.t2 if self.t5 is not None else None
         if not self.resuelta or self.disparada_en is None or self.cerrado_en is None:
             return None
         return self.cerrado_en - self.disparada_en
 
     @property
-    def accion_incorrecta(self) -> bool:
+    def recuperado(self) -> bool:
+        return self.t5 is not None if self.t2 is not None else self.verificado
+
+    @property
+    def resultado(self) -> ResultadoAccion:
         if self.acciones == 0:
-            return False
-        return self.categoria_detectada != self.categoria_esperada or not self.verificado
+            return ResultadoAccion.ABSTENCION
+        if any(n not in ACCIONES_PERMITIDAS for n in self.nombres_acciones):
+            return ResultadoAccion.NO_AUTORIZADA
+        cat = CATALOGO[self.categoria_esperada]
+        if (
+            self.categoria_detectada != self.categoria_esperada
+            or any(n not in (cat.accion, cat.rollback) for n in self.nombres_acciones)
+            or any(s != self.servicio for s in self.servicios_acciones if self.servicio)
+        ):
+            return ResultadoAccion.DESTINO_INCORRECTO
+        if self.otros_afectados:
+            return ResultadoAccion.AGRAVA
+        return ResultadoAccion.CORRECTA if self.recuperado else ResultadoAccion.SIN_RECUPERACION
+
+    @property
+    def accion_incorrecta(self) -> bool:
+        return self.resultado in INCORRECTOS
+
+    @property
+    def abstencion_correcta(self) -> bool:
+        """Tesis, Tabla 16: no ejecuto la accion, o escalo tras un intento."""
+        return self.acciones == 0 or (self.estado == "escalado" and self.acciones == 1)
+
+    @property
+    def escalamiento_s(self) -> float | None:
+        if self.escalado_en is None or self.t2 is None:
+            return None
+        return self.escalado_en - self.t2
 
 
 @dataclass(frozen=True)
@@ -99,17 +182,27 @@ class CorridaManual:
     """Una fila de la linea base: la misma falla, resuelta a mano por un operador."""
 
     categoria: str
-    mttr_s: float
+    mttr_s: float | None  # None: no se recupero dentro de la ventana
     accion_incorrecta: bool
+    variante: str = ""
+
+    @property
+    def escenario(self) -> str:
+        return f"{self.categoria}/{self.variante}" if self.variante else self.categoria
 
     @classmethod
     def desde_fila(cls, f: Mapping[str, str]) -> CorridaManual:
         if f["categoria"] not in CATALOGO:
             raise ValueError(f"categoria desconocida: {f['categoria']!r}")
         mttr = _float(f["mttr_s"])
-        if mttr is None or mttr <= 0:
-            raise ValueError("cada fila de la linea base necesita un mttr_s positivo")
-        return cls(f["categoria"], mttr, _bool(f.get("accion_incorrecta", "false")))
+        if mttr is not None and mttr <= 0:
+            raise ValueError("cada fila de la linea base necesita un mttr_s positivo o vacio")
+        return cls(
+            f["categoria"],
+            mttr,
+            _bool(f.get("accion_incorrecta", "false")),
+            f.get("variante") or "",
+        )
 
 
 def tra(corridas: Sequence[Corrida]) -> float:
@@ -158,11 +251,82 @@ def precision_clasificacion(corridas: Sequence[Corrida]) -> float:
 
 
 def tasa_acciones_incorrectas(corridas: Sequence[Corrida]) -> float:
-    """Sobre las corridas en las que se actuo: actuar mal, no abstenerse, es lo que mide H3."""
-    con_accion = [c for c in corridas if c.acciones > 0]
-    if not con_accion:
+    """Sobre todas las corridas: cada accion o abstencion se clasifica (Tabla 15)."""
+    if not corridas:
         return 0.0
-    return 100 * sum(c.accion_incorrecta for c in con_accion) / len(con_accion)
+    return 100 * sum(c.accion_incorrecta for c in corridas) / len(corridas)
+
+
+def proporcion(k: int, n: int) -> str:
+    """`k de n (p %, IC 95 % lo-hi %)`: cero eventos no significa riesgo cero."""
+    if n == 0:
+        return "sin corridas"
+    lo, hi = intervalo_wilson(k, n)
+    return f"{k} de {n} ({100 * k / n:.1f} %, IC 95 % {lo:.1f}-{hi:.1f} %)"
+
+
+@dataclass(frozen=True)
+class Calificacion:
+    """Una fila de la rubrica (docs/rubrica-diagnostico.md), calificada a mano."""
+
+    incidente: str
+    diagnostico: str  # coincide | parcial | no_coincide
+    escalamiento_completo: bool  # causa, evidencia y acciones realizadas
+
+    @classmethod
+    def desde_fila(cls, f: Mapping[str, str]) -> Calificacion:
+        if f["diagnostico"] not in ("coincide", "parcial", "no_coincide"):
+            raise ValueError(f"diagnostico sin calificar: {f.get('incidente')}")
+        return cls(
+            f["incidente"],
+            f["diagnostico"],
+            all(_bool(f[k]) for k in ("tiene_causa", "tiene_evidencia", "tiene_acciones")),
+        )
+
+
+@dataclass(frozen=True)
+class IndicadoresVariantes:
+    """Los seis indicadores de la tesis (6.6) sobre las variantes de una condicion."""
+
+    n: int
+    abstencion_previa: int
+    abstencion_correcta: int
+    accion_ineficaz: int
+    con_reintentos: int
+    diagnostico_coincide: int
+    diagnostico_parcial: int
+    calificados: int
+    escalamiento_completo: int
+    tokens_medios: float
+    tools_medias: float
+    tiempo_medio_s: float | None
+
+
+def indicadores_variantes(
+    corridas: Sequence[Corrida], calificaciones: Mapping[str, Calificacion] | None = None
+) -> IndicadoresVariantes:
+    vs = [c for c in corridas if c.variante]
+    notas = [calificaciones[c.incidente] for c in vs if c.incidente in (calificaciones or {})]
+    n = len(vs) or 1
+    tiempos = [
+        t for c in vs if (t := c.mttr_s if c.mttr_s is not None else c.escalamiento_s) is not None
+    ]
+    return IndicadoresVariantes(
+        n=len(vs),
+        abstencion_previa=sum(c.acciones == 0 for c in vs),
+        abstencion_correcta=sum(c.abstencion_correcta for c in vs),
+        accion_ineficaz=sum(c.resultado is ResultadoAccion.SIN_RECUPERACION for c in vs),
+        # ponytail: cuenta reintentos, no si hubo evidencia nueva entre ellos; eso se lee en la
+        # linea de tiempo de cada caso. Automatizarlo cuando el analisis cualitativo no alcance.
+        con_reintentos=sum(c.acciones > 1 for c in vs),
+        diagnostico_coincide=sum(x.diagnostico == "coincide" for x in notas),
+        diagnostico_parcial=sum(x.diagnostico == "parcial" for x in notas),
+        calificados=len(notas),
+        escalamiento_completo=sum(x.escalamiento_completo for x in notas),
+        tokens_medios=sum(c.tokens for c in vs) / n,
+        tools_medias=sum(c.llamadas_tools for c in vs) / n,
+        tiempo_medio_s=sum(tiempos) / len(tiempos) if tiempos else None,
+    )
 
 
 @dataclass(frozen=True)
@@ -175,63 +339,84 @@ class Hipotesis:
     nota: str = ""
 
 
+def _media(valores: Sequence[float]) -> float:
+    return sum(valores) / len(valores)
+
+
+def mttr_por_escenario(
+    corridas: Sequence[Corrida], base: Sequence[CorridaManual]
+) -> dict[str, tuple[float, float]]:
+    """{escenario: (media linea base, media agente)}, solo donde ambos tienen casos
+    recuperados: la comparacion queda condicionada a ellos y asi se declara."""
+    pares: dict[str, tuple[float, float]] = {}
+    for esc in sorted({b.escenario for b in base}):
+        del_base = [b.mttr_s for b in base if b.escenario == esc and b.mttr_s is not None]
+        del_agente = [t for c in corridas if c.escenario == esc and (t := c.mttr_s) is not None]
+        if del_base and del_agente:
+            pares[esc] = (_media(del_base), _media(del_agente))
+    return pares
+
+
+def _h3(nombre: str, cs: Sequence[Corrida], bs: Sequence[CorridaManual]) -> Hipotesis:
+    k = sum(c.accion_incorrecta for c in cs)
+    nota = f"agente {proporcion(k, len(cs))}"
+    tasa = tasa_acciones_incorrectas(cs)
+    if not bs or not cs:
+        return Hipotesis(nombre, tasa, "<= linea base", None, len(cs), f"{nota}; sin comparacion")
+    kb = sum(b.accion_incorrecta for b in bs)
+    tasa_base = 100 * kb / len(bs)
+    nota += f"; manual {proporcion(kb, len(bs))}"
+    return Hipotesis(nombre, tasa, f"<= {tasa_base:.1f}%", tasa <= tasa_base, len(cs), nota)
+
+
 def contrastar(corridas: Sequence[Corrida], base: Sequence[CorridaManual]) -> list[Hipotesis]:
-    """H1: TRA >= 30%. H2: reduccion de MTTR >= 20% (en las categorias que el agente
-    resolvio y que tienen linea base). H3: sin aumento de acciones incorrectas."""
+    """Criterios fijados en la tesis, 6.6. H3 es exploratoria: no demuestra no inferioridad."""
     hs: list[Hipotesis] = []
-
-    elegibles = sum(c.elegible for c in corridas)
+    umbral_h1 = f">= {TRA_MINIMA:g}%"
     try:
-        valor_tra = tra(corridas)
-        hs.append(
-            Hipotesis(
-                "H1 TRA", valor_tra, f">= {TRA_MINIMA:g}%", valor_tra >= TRA_MINIMA, elegibles
-            )
+        valor, lo, hi, n = tra_con_intervalo(corridas)
+        evidencia = "si" if lo > TRA_MINIMA else "no"
+        nota = (
+            f"IC 95 % {lo:.1f}-{hi:.1f} %; evidencia estadistica favorable al umbral: {evidencia}"
         )
+        hs.append(Hipotesis("H1 TRA", valor, umbral_h1, valor >= TRA_MINIMA, n, nota))
     except ValueError as exc:
-        hs.append(Hipotesis("H1 TRA", None, f">= {TRA_MINIMA:g}%", None, 0, str(exc)))
+        hs.append(Hipotesis("H1 TRA", None, umbral_h1, None, 0, str(exc)))
 
-    reducciones: list[float] = []
-    for cat in sorted({b.categoria for b in base}):
-        del_agente = [c for c in corridas if c.categoria_esperada == cat]
-        if not any(c.mttr_s is not None for c in del_agente):
-            continue
-        base_cat = [b.mttr_s for b in base if b.categoria == cat]
-        reducciones.append(reduccion_mttr(sum(base_cat) / len(base_cat), mttr(del_agente)))
-    if reducciones:
-        red = sum(reducciones) / len(reducciones)
-        umbral = f">= {REDUCCION_MTTR_MINIMA:g}%"
-        nota = f"promedio de {len(reducciones)} categorias"
+    limpios = [c for c in corridas if not c.variante]
+    base_limpia = [b for b in base if not b.variante]
+    pares = mttr_por_escenario(limpios, base_limpia)
+    umbral_h2 = f">= {REDUCCION_MTTR_MINIMA:g}%"
+    if pares:
+        red = reduccion_mttr(
+            _media([b for b, _ in pares.values()]), _media([a for _, a in pares.values()])
+        )
+        nota = f"media de {len(pares)} escenarios pareados, solo casos recuperados"
         hs.append(
-            Hipotesis("H2 MTTR", red, umbral, red >= REDUCCION_MTTR_MINIMA, len(reducciones), nota)
+            Hipotesis("H2 MTTR", red, umbral_h2, red >= REDUCCION_MTTR_MINIMA, len(pares), nota)
         )
     else:
-        nota = "sin categorias con linea base y corridas resueltas"
-        hs.append(Hipotesis("H2 MTTR", None, f">= {REDUCCION_MTTR_MINIMA:g}%", None, 0, nota))
+        nota = "sin escenarios con linea base y casos recuperados"
+        hs.append(Hipotesis("H2 MTTR", None, umbral_h2, None, 0, nota))
 
-    tasa_agente = tasa_acciones_incorrectas(corridas)
-    if base:
-        tasa_base = 100 * sum(b.accion_incorrecta for b in base) / len(base)
-        nota = f"agente {tasa_agente:.1f}% vs manual {tasa_base:.1f}%"
-        hs.append(
-            Hipotesis(
-                "H3 incorrectas",
-                tasa_agente,
-                f"<= {tasa_base:.1f}%",
-                tasa_agente <= tasa_base,
-                len(corridas),
-                nota,
-            )
+    variantes = [c for c in corridas if c.variante]
+    base_var = [b for b in base if b.variante]
+    h_limpios = _h3("H3 limpios", limpios, base_limpia)
+    h_variantes = _h3("H3 variantes", variantes, base_var)
+    partes = [h for h, cs in ((h_limpios, limpios), (h_variantes, variantes)) if cs]
+    cumple = (
+        None
+        if any(h.cumple is None for h in partes) or not partes
+        else all(h.cumple for h in partes)
+    )
+    hs.append(
+        Hipotesis(
+            "H3 incorrectas",
+            tasa_acciones_incorrectas(corridas),
+            "<= linea base, por grupo",
+            cumple,
+            len(corridas),
+            "exploratoria: no demuestra equivalencia",
         )
-    else:
-        hs.append(
-            Hipotesis(
-                "H3 incorrectas",
-                tasa_agente,
-                "<= linea base",
-                None,
-                len(corridas),
-                "sin linea base manual",
-            )
-        )
-    return hs
+    )
+    return [*hs, *partes]

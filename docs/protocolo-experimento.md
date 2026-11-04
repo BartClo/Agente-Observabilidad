@@ -64,16 +64,13 @@ Usar el script guiado, que inyecta la misma falla, mide con el mismo criterio qu
 agente y escribe el CSV:
 
     python -m scripts.linea_base --categoria pod_fallido --operador <nombre> --salida resultados/linea_base.csv
+    python -m scripts.linea_base --categoria pod_fallido/config_invalida --operador <nombre>
 
-El operador resuelve la falla con los runbooks mientras corre el cronómetro; al dejar de
-verse la alerta el script pregunta si hubo alguna acción incorrecta. Repetir ≥ 3 veces por
-categoría remediable (`pod_fallido`, `servicio_detenido`), idealmente con más de un
-operador. El fin se mide cuando la alerta deja de verse; el agente cierra después de su
-propia verificación, así que la comparación es levemente conservadora frente a H2.
+El cronómetro corre de t2 (alerta disparada) a t5 (señal sana, con el mismo verificador externo
+que el agente). Al terminar, el operador clasifica su acción con la Tabla 15 de la tesis. Si no
+se recupera en 15 minutos, el caso se registra como no resuelto. Repetir ≥ 3 veces por escenario.
 
-Registrar en `resultados/linea_base.csv` (plantilla: `resultados/linea_base.ejemplo.csv`,
-columnas `categoria,mttr_s,accion_incorrecta,operador,notas`). Idealmente, 3 o más
-corridas por categoría y más de un operador.
+El CSV tiene las columnas `categoria,variante,mttr_s,resultado,accion_incorrecta,operador,notas`.
 
 ## 3. Correr el experimento
 
@@ -148,8 +145,21 @@ python -m scripts.analizar_experimento resultados/llm-n3.csv \
     --linea-base resultados/linea_base.csv
 ```
 
-Imprime tablas Markdown por categoría y el contraste de H1–H3. Si el CSV es de
+Imprime tablas Markdown por escenario, la Tabla 15 separando limpias y variantes, el MTTR
+pareado y el contraste de H1–H3 con los criterios del §6.6 de la tesis. Si el CSV es de
 `--modo script`, el reporte lo advierte.
+
+Para las variantes:
+
+```bash
+# 1. Rúbrica fijada ANTES de las corridas: docs/rubrica-diagnostico.md (su hash va en el congelado)
+# 2. Generar la plantilla y calificarla a mano
+python -m scripts.analizar_experimento resultados/llm-n3.csv --plantilla-rubrica resultados/rubrica.csv
+python -m scripts.analizar_experimento resultados/reglas.csv --plantilla-rubrica resultados/rubrica-reglas.csv
+# 3. Unir las dos planillas en una y comparar agente contra regla
+python -m scripts.analizar_experimento resultados/llm-n3.csv --linea-base resultados/linea_base.csv \\
+    --regla resultados/reglas.csv --calificaciones resultados/rubrica.csv
+```
 
 ## Checklist para el día que llegue la API key
 

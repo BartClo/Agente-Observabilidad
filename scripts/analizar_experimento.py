@@ -31,15 +31,98 @@ def _fmt(
         return "–"
 
 
+def _mediana_rango(cs: Sequence[ev.Corrida]) -> str:
+    ts = sorted(t for c in cs if (t := c.mttr_s) is not None)
+    return f"{median(ts):.1f} s | {ts[0]:.1f}–{ts[-1]:.1f} s" if ts else "– | –"
+
+
+def _hasta_escalar(cs: Sequence[ev.Corrida]) -> str:
+    ts = [t for c in cs if (t := c.escalamiento_s) is not None]
+    return f"{median(ts):.1f} s" if ts else "–"
+
+
+def tabla_resultados(corridas: Sequence[ev.Corrida]) -> str:
+    """Tabla 15, separando fallas limpias y variantes confusoras."""
+    filas = ["| Resultado | Limpias | Variantes |", "|---|---|---|"]
+    limpias = [c for c in corridas if not c.variante]
+    variantes = [c for c in corridas if c.variante]
+    for r in ev.ResultadoAccion:
+        k_l = sum(c.resultado is r for c in limpias)
+        k_v = sum(c.resultado is r for c in variantes)
+        filas.append(f"| {r.value} | {ev.proporcion(k_l, len(limpias))} | "
+                     f"{ev.proporcion(k_v, len(variantes))} |")  # fmt: skip
+    return "\n".join(filas)
+
+
+def tabla_mttr_pareado(corridas: Sequence[ev.Corrida], base: Sequence[ev.CorridaManual]) -> str:
+    filas = ["| Escenario | Línea base | Agente | Reducción |", "|---|---|---|---|"]
+    for esc, (b, a) in ev.mttr_por_escenario(corridas, base).items():
+        filas.append(f"| {esc} | {b:.1f} s | {a:.1f} s | {100 * (b - a) / b:.1f} % |")
+    return "\n".join(filas)
+
+
+def tabla_indicadores(columnas: dict[str, ev.IndicadoresVariantes]) -> str:
+    """Los seis indicadores de la tesis (6.6), por condicion."""
+    nombres = list(columnas)
+    filas = ["| Indicador | " + " | ".join(nombres) + " |", "|---" * (len(nombres) + 1) + "|"]
+
+    def fila(titulo: str, valor: Callable[[ev.IndicadoresVariantes], str]) -> None:
+        filas.append(f"| {titulo} | " + " | ".join(valor(columnas[n]) for n in nombres) + " |")
+
+    fila("Abstención previa", lambda i: f"{i.abstencion_previa} de {i.n}")
+    fila("Abstención correcta", lambda i: f"{i.abstencion_correcta} de {i.n}")
+    fila("Acción ineficaz", lambda i: f"{i.accion_ineficaz} de {i.n}")
+    fila("Con reintentos", lambda i: f"{i.con_reintentos} de {i.n}")
+    fila(
+        "Diagnóstico coincide / parcial",
+        lambda i: f"{i.diagnostico_coincide} / {i.diagnostico_parcial} de {i.calificados}",
+    )
+    fila("Escalamiento completo", lambda i: f"{i.escalamiento_completo} de {i.calificados}")
+    fila("Tokens medios", lambda i: f"{i.tokens_medios:.0f}")
+    fila("Llamadas a tools medias", lambda i: f"{i.tools_medias:.1f}")
+    fila(
+        "Tiempo medio por escenario",
+        lambda i: "–" if i.tiempo_medio_s is None else f"{i.tiempo_medio_s:.1f} s",
+    )
+    return "\n".join(filas)
+
+
+def plantilla_rubrica(filas: Sequence[dict[str, str]], ruta: str) -> int:
+    """CSV para calificar a mano: cada incidente escalado o de una variante, con lo que dijo."""
+    columnas = [
+        "incidente", "escenario", "causa_inyectada", "causa_del_agente", "motivo_escalamiento",
+        "diagnostico", "tiene_causa", "tiene_evidencia", "tiene_acciones",
+    ]  # fmt: skip
+    a_calificar = [
+        f for f in filas if f.get("incidente") and (f.get("variante") or f["estado"] == "escalado")
+    ]
+    with open(ruta, "w", encoding="utf-8", newline="") as salida:
+        w = csv.DictWriter(salida, fieldnames=columnas)
+        w.writeheader()
+        for f in a_calificar:
+            variante = f.get("variante") or ""
+            w.writerow(
+                {
+                    "incidente": f["incidente"],
+                    "escenario": f["categoria_esperada"] + (f"/{variante}" if variante else ""),
+                    "causa_inyectada": variante or f["categoria_esperada"],
+                    "causa_del_agente": f.get("causa", ""),
+                    "motivo_escalamiento": f.get("motivo_escalamiento", ""),
+                }
+            )
+    return len(a_calificar)
+
+
 def tabla_por_categoria(corridas: Sequence[ev.Corrida]) -> str:
     filas = [
-        "| Categoría | n | Elegible | TRA | MTTR | Precisión clasif. "
-        "| Acciones incorrectas | Tokens/inc. | Turnos LLM/inc. |",
-        "|---|---|---|---|---|---|---|---|---|",
+        "| Escenario | n | Elegible | TRA | MTTR (t2→t5) | Mediana | Rango | Recuperados "
+        "| Escalados | Hasta escalar | Precisión clasif. | Acciones incorrectas "
+        "| Tokens/inc. | Turnos LLM/inc. |",
+        "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|",
     ]
     grupos: dict[str, list[ev.Corrida]] = {}
     for c in corridas:
-        grupos.setdefault(c.categoria_esperada, []).append(c)
+        grupos.setdefault(c.escenario, []).append(c)
     for cat, cs in sorted(grupos.items()):
         con_tokens = [c.tokens for c in cs if c.tokens]
         tokens = f"{sum(con_tokens) / len(con_tokens):.0f}" if con_tokens else "–"
@@ -47,13 +130,17 @@ def tabla_por_categoria(corridas: Sequence[ev.Corrida]) -> str:
         turnos = f"{sum(con_turnos) / len(con_turnos):.1f}" if con_turnos else "–"
         filas.append(
             f"| {cat} | {len(cs)} | {'sí' if cs[0].elegible else 'no'} | "
-            f"{_fmt(ev.tra, cs, '%')} | {_fmt(ev.mttr, cs, ' s')} | "
+            f"{_fmt(ev.tra, cs, '%')} | {_fmt(ev.mttr, cs, ' s')} | {_mediana_rango(cs)} | "
+            f"{sum(c.mttr_s is not None for c in cs)} | "
+            f"{sum(c.estado == 'escalado' for c in cs)} | {_hasta_escalar(cs)} | "
             f"{_fmt(ev.precision_clasificacion, cs, '%')} | "
             f"{ev.tasa_acciones_incorrectas(cs):.1f}% | {tokens} | {turnos} |"
         )
     filas.append(
         f"| **Total** | {len(corridas)} | | {_fmt(ev.tra, corridas, '%')} | "
-        f"{_fmt(ev.mttr, corridas, ' s')} | "
+        f"{_fmt(ev.mttr, corridas, ' s')} | {_mediana_rango(corridas)} | "
+        f"{sum(c.mttr_s is not None for c in corridas)} | "
+        f"{sum(c.estado == 'escalado' for c in corridas)} | {_hasta_escalar(corridas)} | "
         f"{_fmt(ev.precision_clasificacion, corridas, '%')} | "
         f"{ev.tasa_acciones_incorrectas(corridas):.1f}% | | |"
     )
@@ -120,6 +207,11 @@ def main(argv: list[str]) -> int:
     p = argparse.ArgumentParser(description="Resume un experimento de la Fase 7.")
     p.add_argument("csv")
     p.add_argument("--linea-base", default=None, help="CSV de la linea base manual")
+    p.add_argument("--regla", default=None, help="CSV del comparador (--modo reglas)")
+    p.add_argument("--calificaciones", default=None, help="rubrica ya calificada")
+    p.add_argument(
+        "--plantilla-rubrica", default=None, help="escribe el CSV para calificar y termina"
+    )
     p.add_argument(
         "--fase",
         choices=("final", "ajuste", "todas"),
@@ -137,6 +229,10 @@ def main(argv: list[str]) -> int:
     # injustamente. Se excluyen y se reportan aparte. Los errores del agente SI cuentan.
     infra = [f for f in todas if f.get("error", "").startswith("infra:")]
     filas = [f for f in todas if not f.get("error", "").startswith("infra:")]
+    if args.plantilla_rubrica:
+        n = plantilla_rubrica(filas, args.plantilla_rubrica)
+        print(f"{n} incidentes para calificar en {args.plantilla_rubrica}")
+        return 0
     corridas = [ev.Corrida.desde_fila(f) for f in filas]
     base = (
         [ev.CorridaManual.desde_fila(f) for f in _leer(args.linea_base)] if args.linea_base else []
@@ -174,6 +270,30 @@ def main(argv: list[str]) -> int:
     rag = resumen_rag(filas)
     if rag:
         print(rag, "\n")
+    print("## Resultado de cada acción (Tabla 15)\n")
+    print(tabla_resultados(corridas), "\n")
+    if base:
+        print("## MTTR pareado por escenario (solo casos recuperados)\n")
+        print(tabla_mttr_pareado(corridas, base), "\n")
+    notas = (
+        {c.incidente: c for c in map(ev.Calificacion.desde_fila, _leer(args.calificaciones))}
+        if args.calificaciones
+        else {}
+    )
+    columnas = {"Agente": ev.indicadores_variantes(corridas, notas)}
+    if args.regla:
+        de_regla = filtrar_fase(_leer(args.regla), args.fase)
+        columnas["Regla"] = ev.indicadores_variantes(
+            [
+                ev.Corrida.desde_fila(f)
+                for f in de_regla
+                if not f.get("error", "").startswith("infra:")
+            ],
+            notas,
+        )
+    if any(i.n for i in columnas.values()):
+        print("## Variantes confusoras\n")
+        print(tabla_indicadores(columnas), "\n")
     print("## Hipótesis\n")
     print(tabla_hipotesis(ev.contrastar(corridas, base)))
     return 0
