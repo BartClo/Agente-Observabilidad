@@ -21,8 +21,12 @@ import ssl
 import urllib.error
 import urllib.parse
 import urllib.request
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import Any
+
+from infra import perfil as perfiles
+from infra.perfil import DestinoK8s
 
 
 def _contenedor(pod: str, c: dict[str, Any]) -> str:
@@ -46,7 +50,11 @@ class BackendKubernetes:
         namespace: str,
         ca_file: str | None = None,
         etiqueta_app: str = "app",
+        namespaces_permitidos: frozenset[str] = frozenset(),
+        servicios: Mapping[str, DestinoK8s] | None = None,
     ) -> None:
+        self._permitidos = namespaces_permitidos  # vacio = solo `namespace`, como siempre
+        self._servicios = dict(servicios or {})
         self._api = api_url.rstrip("/")
         self._token = token
         self._ns = namespace
@@ -63,12 +71,25 @@ class BackendKubernetes:
                 token = f.read().strip()
         else:
             token = os.environ["AIOPS_K8S_TOKEN"]
+        perfil = perfiles.activo()
         return cls(
             api_url=os.environ["AIOPS_K8S_API"],
             token=token,
             namespace=os.environ.get("AIOPS_K8S_NAMESPACE", "aiops-lab"),
             ca_file=os.environ.get("AIOPS_K8S_CA_FILE") or None,
+            etiqueta_app=perfil.kubernetes.etiqueta_app if perfil else "app",
+            namespaces_permitidos=perfil.kubernetes.namespaces if perfil else frozenset(),
+            servicios=perfil.kubernetes.servicios if perfil else None,
         )
+
+    def _destino(self, servicio: str) -> tuple[str, str, str]:
+        """(namespace, deployment, valor del selector). Lo decide la configuracion, nunca el
+        LLM; un namespace fuera de los permitidos se niega antes de llamar a la API."""
+        d = self._servicios.get(servicio, DestinoK8s())
+        ns = d.namespace or self._ns
+        if self._permitidos and ns not in self._permitidos:
+            raise RuntimeError(f"namespace {ns!r} no permitido para {servicio!r}: escalar")
+        return ns, d.deployment or servicio, d.selector or servicio
 
     def _pedir(self, metodo: str, ruta: str, cuerpo: Any, tipo: str, timeout_s: int) -> Any:
         datos = json.dumps(cuerpo).encode() if cuerpo is not None else None
@@ -89,12 +110,13 @@ class BackendKubernetes:
     def eventos(self, servicio: str, maximo: int = 15) -> list[str]:
         """Solo lectura: estado de los contenedores de los pods `app=<servicio>` y los ultimos
         eventos de esos pods. Namespace y selector salen de la configuracion y del incidente."""
-        selector = urllib.parse.urlencode({"labelSelector": f"{self._etiqueta}={servicio}"})
+        ns, _, valor = self._destino(servicio)
+        selector = urllib.parse.urlencode({"labelSelector": f"{self._etiqueta}={valor}"})
         pods = self._pedir(
-            "GET", f"/api/v1/namespaces/{self._ns}/pods?{selector}", None, "application/json", 10
+            "GET", f"/api/v1/namespaces/{ns}/pods?{selector}", None, "application/json", 10
         ).get("items", [])
         if not pods:
-            return [f"sin pods {self._etiqueta}={servicio} en {self._ns}"]
+            return [f"sin pods {self._etiqueta}={valor} en {ns}"]
         lineas: list[str] = []
         nombres = set()
         for pod in pods:
@@ -105,7 +127,7 @@ class BackendKubernetes:
             lineas += [_contenedor(nombre, c) for c in estado.get("containerStatuses", [])]
         campo = urllib.parse.urlencode({"fieldSelector": "involvedObject.kind=Pod"})
         crudos = self._pedir(
-            "GET", f"/api/v1/namespaces/{self._ns}/events?{campo}", None, "application/json", 10
+            "GET", f"/api/v1/namespaces/{ns}/events?{campo}", None, "application/json", 10
         ).get("items", [])
         propios = [e for e in crudos if e.get("involvedObject", {}).get("name") in nombres]
         propios.sort(key=lambda e: e.get("lastTimestamp") or e.get("eventTime") or "")
@@ -117,19 +139,20 @@ class BackendKubernetes:
         return lineas
 
     def ejecutar(self, accion: str, servicio: str, timeout_s: int) -> str:
+        ns, deployment, valor = self._destino(servicio)
         if accion == "recreate_pod":
-            selector = urllib.parse.urlencode({"labelSelector": f"{self._etiqueta}={servicio}"})
+            selector = urllib.parse.urlencode({"labelSelector": f"{self._etiqueta}={valor}"})
             res = self._pedir(
                 "DELETE",
-                f"/api/v1/namespaces/{self._ns}/pods?{selector}",
+                f"/api/v1/namespaces/{ns}/pods?{selector}",
                 None,
                 "application/json",
                 timeout_s,
             )
             borrados = [p["metadata"]["name"] for p in res.get("items", [])]
             if not borrados:
-                raise RuntimeError(f"no hay pods {self._etiqueta}={servicio} en {self._ns}")
-            return f"pods recreados en {self._ns}: {', '.join(borrados)}"
+                raise RuntimeError(f"no hay pods {self._etiqueta}={valor} en {ns}")
+            return f"pods recreados en {ns}: {', '.join(borrados)}"
         if accion in ("restart_service", "restart_consumer"):
             ahora = datetime.now(UTC).isoformat()
             parche = {
@@ -137,10 +160,10 @@ class BackendKubernetes:
             }
             self._pedir(
                 "PATCH",
-                f"/apis/apps/v1/namespaces/{self._ns}/deployments/{servicio}",
+                f"/apis/apps/v1/namespaces/{ns}/deployments/{deployment}",
                 parche,
                 "application/strategic-merge-patch+json",
                 timeout_s,
             )
-            return f"rollout restart de deployment/{servicio} en {self._ns}"
+            return f"rollout restart de deployment/{deployment} en {ns}"
         raise RuntimeError(f"accion {accion!r} no soportada por el backend Kubernetes: escalar")
