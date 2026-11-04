@@ -38,6 +38,11 @@ CONSULTAS_POR_DEFECTO: dict[str, str] = {
 }
 
 
+class _SinRedireccion(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *args: Any, **kwargs: Any) -> None:
+        return None
+
+
 class PrometheusLoki:
     def __init__(
         self,
@@ -48,7 +53,11 @@ class PrometheusLoki:
         mountpoint: str = "/",
         timeout_s: float = 10.0,
         etiqueta_logs: str | None = None,
+        auth_prometheus: str | None = None,
+        auth_loki: str | None = None,
+        org_id: str | None = None,
     ) -> None:
+        self._auth_prom, self._auth_loki, self._org = auth_prometheus, auth_loki, org_id
         self._etiqueta_logs = etiqueta_logs or etiqueta_servicio
         self._prom = prometheus_url.rstrip("/")
         self._loki = loki_url.rstrip("/") if loki_url else None
@@ -61,25 +70,43 @@ class PrometheusLoki:
     def desde_entorno(cls) -> PrometheusLoki:
         from infra import perfil as perfiles
 
+        conexion: dict[str, Any] = {
+            "prometheus_url": os.environ["AIOPS_PROMETHEUS_URL"],
+            "loki_url": os.environ.get("AIOPS_LOKI_URL") or None,
+            "auth_prometheus": os.environ.get("AIOPS_PROMETHEUS_AUTH") or None,
+            "auth_loki": os.environ.get("AIOPS_LOKI_AUTH") or None,
+            "org_id": os.environ.get("AIOPS_OBS_ORG_ID") or None,
+        }
         perfil = perfiles.activo()
         if perfil is not None:
             return cls(
-                prometheus_url=os.environ["AIOPS_PROMETHEUS_URL"],
-                loki_url=os.environ.get("AIOPS_LOKI_URL") or None,
+                **conexion,
                 consultas={**CONSULTAS_POR_DEFECTO, **perfil.consultas},
                 etiqueta_servicio=perfil.etiqueta_servicio,
                 etiqueta_logs=perfil.etiqueta_logs,
                 mountpoint=perfil.mountpoint,
             )
         return cls(
-            prometheus_url=os.environ["AIOPS_PROMETHEUS_URL"],
-            loki_url=os.environ.get("AIOPS_LOKI_URL") or None,
+            **conexion,
             etiqueta_servicio=os.environ.get("AIOPS_SERVICE_LABEL", "service"),
             mountpoint=os.environ.get("AIOPS_DISK_MOUNTPOINT", "/"),
         )
 
     def _get(self, url: str) -> Any:
-        with urllib.request.urlopen(url, timeout=self._timeout) as resp:  # noqa: S310
+        es_loki = self._loki is not None and url.startswith(self._loki)
+        auth = self._auth_loki if es_loki else self._auth_prom
+        encabezados = {"Authorization": auth} if auth else {}
+        if self._org:
+            encabezados["X-Scope-OrgID"] = self._org
+        if encabezados:
+            # Sin seguir redirecciones: urllib reenviaria la credencial a otro host.
+            pedido = urllib.request.Request(url, headers=encabezados)  # noqa: S310
+            apertura = urllib.request.build_opener(_SinRedireccion).open(
+                pedido, timeout=self._timeout
+            )
+        else:
+            apertura = urllib.request.urlopen(url, timeout=self._timeout)  # noqa: S310
+        with apertura as resp:
             return json.loads(resp.read().decode())
 
     def alertas_activas(self) -> list[Alerta]:
