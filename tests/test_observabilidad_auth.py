@@ -32,7 +32,7 @@ def test_cada_backend_recibe_su_credencial(monkeypatch: pytest.MonkeyPatch) -> N
 def test_con_credencial_no_sigue_redirecciones() -> None:
     from infra.observabilidad import _SinRedireccion
 
-    assert _SinRedireccion().redirect_request() is None
+    assert _SinRedireccion().redirect_request() is None  # type: ignore[func-returns-value]
 
 
 def test_la_credencial_viene_del_entorno(monkeypatch: pytest.MonkeyPatch) -> None:
