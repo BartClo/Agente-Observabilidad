@@ -488,7 +488,7 @@ class Ciclo:
         """Nivel 2: diagnosticado, elegible y sin decision humana todavia. Es una espera
         legitima, no un incidente abandonado."""
         return (
-            self.politica.nivel is NivelAutonomia.CON_APROBACION
+            self.politica.nivel_de(inc.categoria_id) is NivelAutonomia.CON_APROBACION
             and inc.estado is Estado.DIAGNOSTICADO
             and inc.elegible
             and inc.aprobacion is None
@@ -529,7 +529,8 @@ class Ciclo:
         )
         razones = "; ".join(decision.razones)
         if decision.veredicto is Veredicto.DENEGAR:
-            if self.politica.nivel < NivelAutonomia.CON_APROBACION and not es_rollback:
+            nivel = self.politica.nivel_de(inc.categoria_id)
+            if nivel < NivelAutonomia.CON_APROBACION and not es_rollback:
                 # Nivel 0/1 = simulacro (dry-run): no se ejecuta nada, pero se deja dicho que
                 # habria hecho el agente, para revisarlo o demostrarlo sin tocar la infraestructura.
                 self.auditoria.registrar(
@@ -537,7 +538,7 @@ class Ciclo:
                 )
                 return ResultadoEjecucion(
                     decision.veredicto,
-                    f"SIMULACRO (nivel {int(self.politica.nivel)}): se habria ejecutado "
+                    f"SIMULACRO (nivel {int(nivel)}): se habria ejecutado "
                     f"{accion} sobre {inc.alerta.servicio}. No se ejecuto nada. Escalar con "
                     "esa recomendacion.",
                     False,

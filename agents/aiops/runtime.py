@@ -34,7 +34,12 @@ def armar(*, persistencia: str | None = None) -> Ciclo:
     propio trabajo sin pisarle el entorno a quien mas corra en el mismo proceso (ver
     docs/plan-aiops.md Fase 2/3). `get_ciclo()` sigue siendo el singleton que lee el
     entorno; esta funcion no lo usa ni lo modifica."""
+    from infra import perfil as perfiles
+
+    perfil = perfiles.activo()  # primero: activa el catalogo del ambiente en este proceso
     backend_nombre = os.environ.get("AIOPS_BACKEND", "simulado")
+    if perfil is not None and backend_nombre == "simulado":
+        raise ValueError("AIOPS_PERFIL requiere AIOPS_BACKEND=prometheus")
     observabilidad: ObservabilidadPort
     backend: BackendAcciones
     if backend_nombre == "simulado":
@@ -64,6 +69,18 @@ def armar(*, persistencia: str | None = None) -> Ciclo:
     # El backend que sabe leer eventos (simulado, Kubernetes) tambien sirve de investigacion.
     investigacion = backend if isinstance(backend, InvestigacionPort) else None
     politica = politica_desde_entorno()
+    if perfil is not None:
+        # El entorno solo acota: AIOPS_ALLOWED_ENVS y AIOPS_AUTONOMY_LEVEL siguen siendo el
+        # tope global, asi que un perfil no puede autorizarse a si mismo un ambiente nuevo.
+        servicios = politica.servicios_permitidos
+        if perfil.servicios is not None:
+            servicios = perfil.servicios if servicios is None else servicios & perfil.servicios
+        politica = dataclasses.replace(
+            politica,
+            niveles_categoria=perfil.niveles,
+            entornos_permitidos=politica.entornos_permitidos & {perfil.entorno},
+            servicios_permitidos=servicios,
+        )
     ruta = os.environ.get("AIOPS_AUDIT_FILE", "").strip()
     on_evento = None
     repositorio: RepositorioIncidentes | None = None

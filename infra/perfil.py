@@ -33,7 +33,7 @@ class PerfilInvalido(ValueError):
 
 @dataclass(frozen=True)
 class MapeoWebhook:
-    """Rutas con puntos dentro de cada alerta recibida. Por defecto, formato Grafana/Alertmanager."""
+    """Rutas con puntos dentro de cada alerta. Por defecto, formato Grafana/Alertmanager."""
 
     lista: str = "alerts"
     nombre: str = "labels.alertname"
@@ -103,7 +103,9 @@ def _plantilla(consulta: Any, metrica: str) -> str:
         raise PerfilInvalido(f"consulta {metrica!r}: debe ser texto y usar $servicio")
     plantilla = consulta.replace("{", "{{").replace("}", "}}")
     return (
-        plantilla.replace("$servicio", "{s}").replace("$etiqueta", "{l}").replace("$mountpoint", "{m}")
+        plantilla.replace("$servicio", "{s}")
+        .replace("$etiqueta", "{l}")
+        .replace("$mountpoint", "{m}")
     )
 
 
@@ -172,7 +174,9 @@ def _kubernetes(datos: dict[str, Any]) -> Kubernetes:
             raise PerfilInvalido(f"namespace invalido: {n!r}")
     for servicio, destino in destinos.items():
         if destino.namespace and destino.namespace not in namespaces:
-            raise PerfilInvalido(f"servicio {servicio}: namespace {destino.namespace!r} no permitido")
+            raise PerfilInvalido(
+                f"servicio {servicio}: namespace {destino.namespace!r} no permitido"
+            )
     return Kubernetes(
         namespaces, _etiqueta(datos.get("etiqueta_app", "app"), "etiqueta_app"), destinos
     )
@@ -203,8 +207,7 @@ def parsear(datos: Any) -> Perfil:
     if '"' in str(obs.get("mountpoint", "")):
         raise PerfilInvalido("mountpoint invalido")
     consultas = {
-        str(m): _plantilla(q, str(m))
-        for m, q in _dict(datos.get("consultas"), "consultas").items()
+        str(m): _plantilla(q, str(m)) for m, q in _dict(datos.get("consultas"), "consultas").items()
     }
     pares = [_categoria(c) for c in datos.get("categorias") or []]
     if not pares:

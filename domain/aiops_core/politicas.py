@@ -42,6 +42,15 @@ class Politica:
     max_acciones_servicio: int = 3
     ventana_cortacircuito_s: float = 3600.0
     kill_switch: Callable[[], bool] = field(default=lambda: False)
+    # Perfil de ambiente: nivel por categoria; `nivel` sigue siendo el tope global. Una
+    # categoria que no figura queda en observacion. None = solo el nivel global.
+    niveles_categoria: Mapping[str, NivelAutonomia] | None = None
+
+    def nivel_de(self, categoria_id: str | None) -> NivelAutonomia:
+        if self.niveles_categoria is None:
+            return self.nivel
+        propio = self.niveles_categoria.get(categoria_id or "", NivelAutonomia.RECOMIENDA)
+        return min(self.nivel, propio)
 
     def evaluar(
         self,
@@ -53,12 +62,13 @@ class Politica:
         aprobada: bool = False,
     ) -> Decision:
         """`aprobada=True` solo lo pasa la tool que ya quedo detras de aprobacion humana."""
+        nivel = self.nivel_de(categoria.id if categoria else None)
         if self.kill_switch():
             return _denegar("kill switch activo")
         if accion not in ACCIONES_PERMITIDAS:
             return _denegar(f"accion {accion!r} fuera de la lista autorizada")
-        if self.nivel < NivelAutonomia.CON_APROBACION:
-            return _denegar(f"autonomia nivel {int(self.nivel)}: solo observa/recomienda")
+        if nivel < NivelAutonomia.CON_APROBACION:
+            return _denegar(f"autonomia nivel {int(nivel)}: solo observa/recomienda")
         if categoria is None or not incidente.elegible:
             return _denegar("incidente no elegible L1")
         if incidente.alerta.severidad is Severidad.CRITICA:
@@ -80,13 +90,13 @@ class Politica:
                 f"confianza {incidente.confianza:.2f} < umbral {self.umbral_confianza:.2f}"
             )
         if es_rollback:
-            if self.nivel < NivelAutonomia.AUTONOMO_CON_ROLLBACK:
+            if nivel < NivelAutonomia.AUTONOMO_CON_ROLLBACK:
                 return _denegar("rollback automatico solo en autonomia nivel 4: escalar")
         elif incidente.intentos >= self.max_reintentos:
             return _denegar(f"limite de {self.max_reintentos} reintentos alcanzado")
         if ACCIONES_PERMITIDAS[accion].riesgo != "bajo":
             return Decision(Veredicto.APROBACION, ("accion de riesgo no bajo",))
-        if self.nivel is NivelAutonomia.CON_APROBACION and not aprobada:
+        if nivel is NivelAutonomia.CON_APROBACION and not aprobada:
             return Decision(Veredicto.APROBACION, ("autonomia nivel 2: requiere aprobacion",))
         return Decision(Veredicto.PERMITIR, ("cumple todas las politicas",))
 

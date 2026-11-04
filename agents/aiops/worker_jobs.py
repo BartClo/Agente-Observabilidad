@@ -94,6 +94,49 @@ def procesar_alerta_webhook(alerta_dict: dict[str, Any], es_firing: bool) -> str
     return f"{inc.id} procesado por el agente"
 
 
+def pedido_reanudar(incidente_id: str) -> str:
+    return (
+        f"Un humano APROBO la remediacion del incidente {incidente_id}, ya diagnosticado. Llama "
+        "`ejecutar_remediacion_con_aprobacion`, despues `verificar_recuperacion` y cierra o "
+        "escala segun el resultado. No repitas los pasos anteriores."
+    )
+
+
+def reanudar_aprobado(incidente_id: str) -> str:
+    """Nivel 2 con LLM: el agente termina su turno al quedar pendiente y este job lo retoma tras
+    la aprobacion. No se reanuda el grafo: el estado vive en el Ciclo, igual que en el respaldo
+    de LLM, y la seguridad la exige el dominio al ejecutar."""
+    ciclo = runtime.armar(persistencia="postgres")
+    inc = ciclo.incidente(incidente_id)
+    if (
+        inc.aprobacion is None
+        or inc.aprobacion.veredicto != "aprobado"
+        or inc.estado in _TERMINALES
+        or inc.acciones
+    ):
+        return f"{incidente_id}: nada que retomar"
+    with bloqueo_servicio(inc.alerta.servicio):
+        atender_con_agente(ciclo, incidente_id, inc.alerta, pedido=pedido_reanudar(incidente_id))
+    return f"{incidente_id} retomado tras la aprobacion"
+
+
+def encolar_reanudacion(incidente_id: str) -> None:
+    import re
+
+    from rq import Retry
+
+    from infra.queue import get_queue
+
+    get_queue("aiops").enqueue(
+        "agents.aiops.worker_jobs.reanudar_aprobado",
+        incidente_id,
+        job_id="aiops-aprobado-" + re.sub(r"[^A-Za-z0-9_-]", "_", incidente_id),
+        job_timeout=int(os.environ.get("AIOPS_JOB_TIMEOUT_S", "900")),
+        retry=Retry(max=int(os.environ.get("AIOPS_JOB_REINTENTOS", "2")), interval=[30, 120]),
+        failure_ttl=int(os.environ.get("AIOPS_JOB_FALLIDOS_TTL_S", str(7 * 86400))),
+    )
+
+
 def encolar_alerta(alerta: Alerta, es_firing: bool) -> bool:
     """Encola la alerta para `procesar_alerta_webhook`. La usan el webhook de Grafana y el
     poller de Jira: mismo dedupe (job_id = alerta.id), timeout, reintentos y cola de fallidos.
@@ -151,7 +194,17 @@ def pedido_de(incidente_id: str, alerta: Alerta) -> str:
     )
 
 
-def atender_con_agente(ciclo: Ciclo, incidente_id: str, alerta: Alerta) -> None:
+def pedido_investigar(incidente_id: str, alerta: Alerta) -> str:
+    return (
+        f"La alerta {alerta.nombre} de {alerta.servicio} (incidente {incidente_id}) esta fuera del "
+        "catalogo: no hay accion autorizada. Investiga con tus tools de lectura y termina con "
+        "`escalar_a_humano`, citando evidencia, causa probable y que revisar."
+    )
+
+
+def atender_con_agente(
+    ciclo: Ciclo, incidente_id: str, alerta: Alerta, pedido: str | None = None
+) -> None:
     """El LLM atiende un incidente ya abierto, hasta cerrarlo o escalarlo. Lo usan el
     worker (alertas reales) y scripts/lab_ciclo.py --modo llm (el experimento de la
     Fase 7): mismo pedido, mismas tools, misma medicion de costo."""
@@ -162,10 +215,20 @@ def atender_con_agente(ciclo: Ciclo, incidente_id: str, alerta: Alerta) -> None:
 
     from langchain_core.callbacks import UsageMetadataCallbackHandler
 
-    from agents.aiops.agente import construir, modelo_por_defecto
+    from agents.aiops.agente import construir, construir_investigador, modelo_por_defecto
     from app.main import modelo_de_la_ui, respaldo_de_la_ui
+    from domain.aiops_core.catalogo import categoria_para_alerta
+    from infra import perfil as perfiles
 
-    pedido = pedido_de(incidente_id, alerta)
+    # Con perfil, lo desconocido se investiga sin poder actuar. Sin perfil, como siempre.
+    desconocida = perfiles.activo() is not None and categoria_para_alerta(alerta.nombre) is None
+    constructor = construir_investigador if desconocida else construir
+    if pedido is None:
+        pedido = (
+            pedido_investigar(incidente_id, alerta)
+            if desconocida
+            else pedido_de(incidente_id, alerta)
+        )
     # El callback suma el uso de TODAS las llamadas al LLM de la corrida, incluidas las
     # del subagente aiops dentro de su tool call: contar solo los mensajes finales del
     # orquestador subestimaria el costo (Fase 6).
@@ -183,7 +246,7 @@ def atender_con_agente(ciclo: Ciclo, incidente_id: str, alerta: Alerta) -> None:
         for i, (modelo, etiqueta) in enumerate(corridas):
             usados.append(etiqueta)
             try:
-                final = construir(modelo).invoke(
+                final = constructor(modelo).invoke(
                     {
                         "messages": [
                             {"role": "user", "content": pedido if i == 0 else _retomar(pedido)}

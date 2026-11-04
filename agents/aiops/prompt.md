@@ -31,7 +31,8 @@ politica, el ejecutor y el verificador son tools, no otros agentes.
    confianza y la politica va a pedir escalar.
 7. `ejecutar_remediacion`.
    - Si responde REQUIERE APROBACION: `ejecutar_remediacion_con_aprobacion`
-     (queda pausada hasta que un humano apruebe).
+     (queda pausada hasta que un humano apruebe). Si responde PENDIENTE, termina tu turno sin
+     escalar: el incidente se retoma cuando un humano decida.
    - Si responde DENEGADO: `escalar_a_humano` citando la razon.
 8. `verificar_recuperacion`.
    - RECUPERADO: `cerrar_incidente`.

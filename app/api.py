@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import dataclasses
 import hmac
+import logging
 import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -32,6 +33,8 @@ from domain.aiops_core.modelos import Incidente
 from infra import kill_switch
 from infra import perfil as perfiles
 from infra.alertas_webhook import alerta_desde_grafana, alertas_con_perfil
+
+logger = logging.getLogger(__name__)
 
 
 async def _reintentar_avisos() -> None:
@@ -203,6 +206,14 @@ def aprobar_incidente(incidente_id: str, body: dict[str, str]) -> dict[str, str]
         runtime.get_ciclo().aprobar(incidente_id, usuario)
     except ErrorCiclo as exc:
         raise HTTPException(404, str(exc)) from exc
+    if perfiles.activo() is not None:
+        from agents.aiops.worker_jobs import encolar_reanudacion
+
+        try:
+            encolar_reanudacion(incidente_id)
+        except Exception:  # la aprobacion ya quedo registrada: no se pierde, se avisa
+            logger.exception("no se pudo retomar %s tras la aprobacion", incidente_id)
+            return {"estado": "aprobado", "reanudacion": "fallo"}
     return {"estado": "aprobado"}
 
 

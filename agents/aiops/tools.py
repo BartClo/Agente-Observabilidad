@@ -136,7 +136,13 @@ def ejecutar_remediacion_con_aprobacion(incidente_id: str) -> str:
     esta tool devuelve ERROR. Esa llamada la hace el canal humano real (endpoint
     `POST /incidentes/{id}/aprobar` de la Fase 2 de docs/plan-aiops.md, no disponible
     todavia), nunca el propio LLM: aprobarse a si mismo no cuenta como aprobacion."""
-    return get_ciclo().ejecutar_remediacion(incidente_id, aprobada=True).mensaje
+    ciclo = get_ciclo()
+    if ciclo.espera_aprobacion(ciclo.incidente(incidente_id)):
+        return (
+            "PENDIENTE DE APROBACION HUMANA: no se ejecuto nada. Termina tu turno sin escalar; "
+            "cuando un humano decida, el incidente se retoma."
+        )
+    return ciclo.ejecutar_remediacion(incidente_id, aprobada=True).mensaje
 
 
 @_seguro
