@@ -39,6 +39,14 @@ Tablero Jira (columna de entrada) ──poller (worker RQ)──► Alerta JIRA-
 El token se carga solo en la UI, nunca en el código ni en el chat. Detalle en la decisión
 D22 de [`docs/decisiones-robustez.md`](docs/decisiones-robustez.md).
 
+## Otros ambientes
+
+Con un perfil YAML (`AIOPS_PERFIL`), el agente se conecta a otro Grafana, Prometheus, Loki y
+Kubernetes sin cambiar código: alertas, consultas, namespaces y autonomía por categoría. Todo
+ambiente nuevo parte en observación, y lo desconocido se investiga sin actuar y se escala.
+Hasta ahora solo está probado con dobles, no contra un ambiente real. Guía en
+[`docs/ambientes.md`](docs/ambientes.md).
+
 ---
 
 ## Hipótesis
