@@ -29,7 +29,7 @@ import urllib.parse
 import urllib.request
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager, nullcontext
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -93,6 +93,22 @@ ESCENARIOS: dict[str, Escenario] = {
     ),
 }
 
+# Variantes confusoras (tesis, Tabla 13): misma alerta y categoria, pero la accion del catalogo
+# no corresponde a la causa. Clave `categoria/variante`. No entran en el denominador de la TRA.
+_VARIANTES_DEF = {
+    "pod_fallido/config_invalida": "config_invalida",
+    "pod_fallido/imagen_inexistente": "imagen_inexistente",
+    "servicio_detenido/variable_ausente": "variable_ausente",
+    "cola_detenida/mensaje_venenoso": "mensaje_venenoso",
+}
+VARIANTES: dict[str, Escenario] = {
+    clave: replace(
+        ESCENARIOS[clave.partition("/")[0]], falla=f"var_{v}.sh", recuperar=f"rev_{v}.sh"
+    )
+    for clave, v in _VARIANTES_DEF.items()
+}
+REPETICIONES_VARIANTE = 3  # tesis, 6.6: tres veces por condicion, analisis exploratorio
+
 COLUMNAS = [
     "corrida",
     "fecha",
@@ -103,6 +119,7 @@ COLUMNAS = [
     "rag",
     "via",
     "categoria_esperada",
+    "variante",
     "alertname",
     "servicio",
     "incidente",
@@ -382,7 +399,7 @@ def _unir(ids: object) -> str:
 
 
 def correr(
-    cat: str,
+    clave: str,
     n: int,
     modo: str,
     nivel: int,
@@ -390,7 +407,8 @@ def correr(
     fase: str = "ajuste",
     via: str = "directo",
 ) -> dict[str, object]:
-    esc = ESCENARIOS[cat]
+    esc = {**ESCENARIOS, **VARIANTES}[clave]
+    cat, _, variante = clave.partition("/")
     fila: dict[str, object] = {c: "" for c in COLUMNAS}
     fila.update(
         corrida=n,
@@ -402,6 +420,7 @@ def correr(
         rag=RAG,
         via=via,
         categoria_esperada=cat,
+        variante=variante,
         alertname=esc.alertname,
         servicio=esc.servicio,
     )
@@ -505,7 +524,9 @@ def correr(
         f" acciones={fila['acciones_nombres'] or '-'}"
     )
     # (6) recuperar para la proxima corrida (si el agente no lo hizo)
-    if esc.recuperar and _prom(esc.anomalia):
+    # Una variante siempre se revierte: su causa (ConfigMap, imagen...) sigue puesta aunque la
+    # senal se vea sana, y contaminaria la corrida siguiente.
+    if esc.recuperar and (variante or _prom(esc.anomalia)):
         _sh(["sh", f"scripts/fallas/{esc.recuperar}"], reintentos=3)
     return fila
 
@@ -540,6 +561,12 @@ def main() -> int:
         default="servicio_detenido,pod_fallido,disco_lleno,cola_detenida,certificado_por_vencer",
     )
     p.add_argument("--repeticiones", type=int, default=3)
+    p.add_argument(
+        "--variantes",
+        action="store_true",
+        help=f"agrega las variantes confusoras, {REPETICIONES_VARIANTE} veces cada una. Con "
+        '--categorias "" corren solo ellas',
+    )
     p.add_argument(
         "--nivel",
         type=int,
@@ -612,6 +639,13 @@ def main() -> int:
                     )
                     w.writerow(correr(cat, n, args.modo, args.nivel, puerto, args.fase, args.via))
                     f.flush()  # una corrida cortada no pierde las anteriores
+                if args.variantes and n <= REPETICIONES_VARIANTE:
+                    for clave in VARIANTES:
+                        print(f"[{n}/{REPETICIONES_VARIANTE}] {clave}")
+                        w.writerow(
+                            correr(clave, n, args.modo, args.nivel, puerto, args.fase, args.via)
+                        )
+                        f.flush()
     print(f"Listo: {salida}")
     return 0
 

@@ -3,6 +3,15 @@
 # `make falla-pod` borra /tmp/ok dentro del pod -> el pod sigue existiendo pero queda
 # NotReady (kube_pod_status_ready{condition="true"} = 0). Es una falla que la accion
 # autorizada `recreate_pod` SI arregla: el pod nuevo arranca con /tmp/ok de nuevo.
+# Variante "configuracion invalida": api lee este valor al arrancar; "ok" es lo sano.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: api-config
+  namespace: aiops-lab
+data:
+  modo: ok
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -12,6 +21,9 @@ metadata:
     app: api
 spec:
   replicas: 1
+  # Variante "imagen inexistente": con RollingUpdate el pod viejo seguiria sano y no habria alerta.
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: api
@@ -30,6 +42,11 @@ spec:
             - sh
             - -c
             - |
+              modo="$(cat /etc/api/modo 2>/dev/null)"
+              if [ "$modo" != "ok" ]; then
+                echo "FATAL api: configuracion invalida: modo=$modo en /etc/api/modo (ConfigMap api-config)"
+                while :; do sleep 3600; done
+              fi
               touch /tmp/ok
               echo "INFO api: listo (chequeo de salud en /tmp/ok)"
               estado=ok
@@ -41,6 +58,9 @@ spec:
                 fi
                 sleep 2
               done
+          volumeMounts:
+            - name: config
+              mountPath: /etc/api
           readinessProbe:
             exec:
               command: ["cat", "/tmp/ok"]
@@ -50,3 +70,7 @@ spec:
             requests:
               cpu: 10m
               memory: 16Mi
+      volumes:
+        - name: config
+          configMap:
+            name: api-config

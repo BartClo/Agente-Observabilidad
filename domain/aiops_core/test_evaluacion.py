@@ -164,3 +164,9 @@ def test_tra_con_intervalo_solo_cuenta_elegibles() -> None:
     except ValueError:
         return
     raise AssertionError("sin elegibles la TRA no esta definida")
+
+
+def test_una_variante_no_entra_en_el_denominador_de_la_tra() -> None:
+    variante = _c(variante="config_invalida", estado="escalado", resuelto_autonomo="False")
+    assert not variante.elegible
+    assert ev.tra([_c(), variante]) == 100

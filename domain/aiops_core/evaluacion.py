@@ -51,6 +51,7 @@ class Corrida:
     cerrado_en: float | None
     tokens: int = 0
     turnos: int = 0
+    variante: str = ""  # variante confusora (tesis, Tabla 13); "" = falla limpia
 
     @classmethod
     def desde_fila(cls, f: Mapping[str, str]) -> Corrida:
@@ -67,12 +68,14 @@ class Corrida:
             cerrado_en=_float(f.get("cerrado_en", "")),
             tokens=int(f.get("tokens_entrada") or 0) + int(f.get("tokens_salida") or 0),
             turnos=int(f.get("turnos_llm") or 0),
+            variante=f.get("variante") or "",
         )
 
     @property
     def elegible(self) -> bool:
-        """Verdad de campo: la falla inyectada tiene una accion autorizada en el catalogo."""
-        return CATALOGO[self.categoria_esperada].remediable
+        """Verdad de campo: la falla inyectada tiene una accion autorizada en el catalogo. Una
+        variante confusora no: por diseno no tiene una remediacion autonoma correcta."""
+        return not self.variante and CATALOGO[self.categoria_esperada].remediable
 
     @property
     def resuelta(self) -> bool:

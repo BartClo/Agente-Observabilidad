@@ -4,6 +4,16 @@
 # no consume mensajes reales; su /metrics publica lo que publicaria el plugin de RabbitMQ
 # (rabbitmq_queue_consumers{queue="worker"}). La falla (scripts/fallas/cola_detenida.sh)
 # lo pone en 0 = consumidor desconectado; al reiniciarse, el pod vuelve a publicar 1.
+# Variante "mensaje venenoso": la cola del consumidor simulado. Un ConfigMap porque el mensaje
+# tiene que sobrevivir al reinicio, como en un broker real.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: worker-cola
+  namespace: aiops-lab
+data:
+  siguiente: ""
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -29,16 +39,29 @@ spec:
             - -c
             - |
               mkdir -p /www
-              printf '# TYPE rabbitmq_queue_consumers gauge\nrabbitmq_queue_consumers{queue="worker"} 1\n' > /www/metrics
-              echo "INFO worker: consumidor conectado a la cola 'worker'"
+              msg="$(cat /etc/cola/siguiente 2>/dev/null)"
+              if [ -n "$msg" ]; then
+                printf '# TYPE rabbitmq_queue_consumers gauge\nrabbitmq_queue_consumers{queue="worker"} 0\n' > /www/metrics
+                echo "ERROR worker: excepcion al procesar el mensaje $msg de la cola 'worker': JSONDecodeError, payload malformado; el consumidor se detuvo"
+              else
+                printf '# TYPE rabbitmq_queue_consumers gauge\nrabbitmq_queue_consumers{queue="worker"} 1\n' > /www/metrics
+                echo "INFO worker: consumidor conectado a la cola 'worker'"
+              fi
               httpd -f -p 8080 -h /www &
               while :; do sleep 3600; done
+          volumeMounts:
+            - name: cola
+              mountPath: /etc/cola
           ports:
             - containerPort: 8080
           resources:
             requests:
               cpu: 10m
               memory: 16Mi
+      volumes:
+        - name: cola
+          configMap:
+            name: worker-cola
 ---
 apiVersion: v1
 kind: Service
