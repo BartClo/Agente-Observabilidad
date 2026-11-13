@@ -145,3 +145,10 @@ def test_la_cola_del_agente_usa_un_redis_propio_que_no_expulsa_claves() -> None:
     compose = _compose()
     assert "aiops-redis" in compose["x-aiops"]["environment"]["REDIS_URL"]
     assert "noeviction" in compose["services"]["aiops-redis"]["command"]
+
+
+def test_la_api_migra_la_base_antes_de_servir_y_el_worker_la_espera() -> None:
+    servicios = _compose()["services"]
+    comando = " ".join(servicios["aiops-agent"]["command"])
+    assert comando.index("alembic upgrade head") < comando.index("uvicorn")
+    assert servicios["aiops-worker"]["depends_on"]["aiops-agent"]["condition"] == "service_healthy"

@@ -26,7 +26,9 @@ services:
   aiops-agent:
     <<: *aiops
     container_name: ia-factory-aiops-agent   # prefijo ia-factory- para que promtail lo recoja
-    command: ["uvicorn", "app.api:app", "--host", "0.0.0.0", "--port", "8000"]
+    # Migraciones al arrancar (idempotentes): sin ellas la base nueva queda vacia. `exec`:
+    # uvicorn queda como proceso principal y recibe las senales de docker stop.
+    command: ["sh", "-c", "alembic upgrade head && exec uvicorn app.api:app --host 0.0.0.0 --port 8000"]
     ports: ["127.0.0.1:8214:8000"]
     mem_limit: 512m
     cpus: 0.5
@@ -48,6 +50,7 @@ services:
     depends_on:
       aiops-db: {condition: service_healthy}
       aiops-redis: {condition: service_healthy}
+      aiops-agent: {condition: service_healthy}   # espera a que la api haya migrado la base
 
   aiops-redis:
     # Propio: el Redis de la plataforma usa allkeys-lru (puede expulsar cualquier clave) y la
