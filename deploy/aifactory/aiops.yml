@@ -14,7 +14,7 @@ x-aiops: &aiops
     AIOPS_ACTIONS: ninguna          # nivel 1: observa, diagnostica y avisa
     AIOPS_AUTONOMY_LEVEL: "1"       # tope global; el perfil no puede superarlo
     AIOPS_ALLOWED_ENVS: dev
-    AIOPS_PERFIL: /perfiles/aifactory-dev.yaml
+    AIOPS_PERFIL: ${AIOPS_PERFIL:-/perfiles/aifactory-dev.yaml}
     AIOPS_PERSISTENCIA: postgres
     AIOPS_PROMETHEUS_URL: http://prometheus:9090
     AIOPS_LOKI_URL: http://loki:3100
@@ -30,9 +30,10 @@ services:
   aiops-agent:
     <<: *aiops
     container_name: ia-factory-aiops-agent   # prefijo ia-factory- para que promtail lo recoja
-    # Migraciones al arrancar (idempotentes): sin ellas la base nueva queda vacia. `exec`:
-    # uvicorn queda como proceso principal y recibe las senales de docker stop.
-    command: ["sh", "-c", "alembic upgrade head && exec uvicorn app.api:app --host 0.0.0.0 --port 8000"]
+    # Antes de servir: valida el perfil (uno sin aprobar o invalido detiene el arranque, en vez
+    # de responder 500 a cada alerta) y migra la base (idempotente). `exec`: uvicorn queda como
+    # proceso principal y recibe las senales de docker stop.
+    command: ["sh", "-c", "python -c 'from infra import perfil; perfil.activo()' && alembic upgrade head && exec uvicorn app.api:app --host 0.0.0.0 --port 8000"]
     ports: ["127.0.0.1:8214:8000"]
     mem_limit: 512m
     cpus: 0.5

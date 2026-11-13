@@ -90,8 +90,31 @@ def procesar_alerta_webhook(alerta_dict: dict[str, Any], es_firing: bool) -> str
 
     with bloqueo_servicio(alerta.servicio):
         inc = ciclo.abrir_desde_alerta(alerta)
-        atender_con_agente(ciclo, inc.id, alerta)
+        try:
+            atender_con_agente(ciclo, inc.id, alerta)
+        except Exception as exc:
+            _escalar_si_es_el_ultimo_intento(ciclo, inc.id, exc)
+            raise
     return f"{inc.id} procesado por el agente"
+
+
+def _escalar_si_es_el_ultimo_intento(ciclo: Ciclo, incidente_id: str, exc: Exception) -> None:
+    """Sin esto, un LLM inalcanzable (clave vencida, proveedor caido) deja el incidente
+    abierto en silencio hasta que otro job lo reconcilie. En el ultimo intento se escala, y el
+    hito `escalado` avisa a una persona. Antes no: el reintento todavia puede atenderlo."""
+    from rq import get_current_job
+
+    job = get_current_job()
+    if job is not None and (job.retries_left or 0) > 0:
+        return
+    try:
+        if ciclo.incidente(incidente_id).estado not in _TERMINALES:
+            ciclo.escalar(
+                incidente_id,
+                f"El agente no pudo atender el incidente ({type(exc).__name__}): revisar a mano.",
+            )
+    except Exception:
+        logger.exception("no se pudo escalar %s tras el fallo del agente", incidente_id)
 
 
 def pedido_reanudar(incidente_id: str) -> str:
