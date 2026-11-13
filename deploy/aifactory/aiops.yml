@@ -15,6 +15,7 @@ x-aiops: &aiops
     AIOPS_PROMETHEUS_URL: http://prometheus:9090
     AIOPS_LOKI_URL: http://loki:3100
     AIOPS_OBS_ORG_ID: ai-factory    # Loki con auth_enabled
+    REDIS_URL: redis://ia-factory-aiops-redis:6379/0
     DATABASE_URL: postgresql://aiops:${AIOPS_DB_PASSWORD:?falta AIOPS_DB_PASSWORD}@ia-factory-aiops-db:5432/aiops
   volumes:
     - ./perfiles:/perfiles:ro
@@ -36,6 +37,7 @@ services:
       retries: 3
     depends_on:
       aiops-db: {condition: service_healthy}
+      aiops-redis: {condition: service_healthy}
 
   aiops-worker:
     <<: *aiops
@@ -45,6 +47,24 @@ services:
     cpus: 1.0
     depends_on:
       aiops-db: {condition: service_healthy}
+      aiops-redis: {condition: service_healthy}
+
+  aiops-redis:
+    # Propio: el Redis de la plataforma usa allkeys-lru (puede expulsar cualquier clave) y la
+    # cola del agente, los bloqueos y los enfriamientos no se pueden perder.
+    image: redis:7.4-alpine
+    container_name: ia-factory-aiops-redis
+    command: ["redis-server", "--maxmemory", "64mb", "--maxmemory-policy", "noeviction", "--appendonly", "yes"]
+    volumes: [aiops-redis:/data]
+    networks: [ia-factory-network]
+    mem_limit: 96m
+    cpus: 0.25
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   aiops-db:
     # Propia y pequena: no se confirmo pgvector en el Postgres de la plataforma.
@@ -67,7 +87,11 @@ services:
 
 volumes:
   aiops-db:
+  aiops-redis:
 
 networks:
   ia-factory-network:
-    external: true   # REVISAR: nombre real de la red del proyecto compose
+    external: true
+    # La red la crea el compose de la plataforma como <proyecto>_ia-factory-network y su
+    # configuracion cita tres proyectos distintos. Confirmar con docker network ls.
+    name: ${AIOPS_RED_PLATAFORMA:?falta AIOPS_RED_PLATAFORMA}

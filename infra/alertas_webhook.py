@@ -66,8 +66,10 @@ def alertas_con_perfil(payload: dict[str, Any], perfil: Perfil) -> list[tuple[Al
     for item in crudo:
         if not isinstance(item, dict):
             raise ValueError("cada alerta debe ser un objeto")
-        ruta = m.servicio or f"labels.{perfil.etiqueta_servicio}"
-        servicio = _texto(_campo(item, ruta))
+        # `servicio` admite rutas alternativas con "|": la primera con valor gana. Cada regla
+        # de un ambiente puede traer el servicio en otra etiqueta (job, service_name, service).
+        rutas = m.servicio.split("|") if m.servicio else [f"labels.{perfil.etiqueta_servicio}"]
+        servicio = next((v for r in rutas if (v := _texto(_campo(item, r.strip())))), "")
         if not servicio and not m.servicio:
             servicio = _texto(_campo(item, "labels.job"))
         servicio = servicio or "desconocido"

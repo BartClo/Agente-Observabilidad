@@ -1,26 +1,30 @@
 # Perfil del entorno dev de AI FACTORY (Docker Compose en la VM iafactory-dev).
-# Fuente: informe de solo lectura del 2026-11-13. Las lineas "REVISAR" no se pudieron
-# confirmar sin acceso a docker ps ni a las etiquetas reales de cada metrica.
+# Fuente: informes de solo lectura del 2026-11-13 (reglas, series y etiquetas de Loki reales).
 # Arranca en nivel 1 (solo observa, diagnostica y avisa): no hay ejecutor de Compose todavia.
 version: 1
 aprobado: false        # borrador: el responsable lo revisa y pone true + aprobado_por
 aprobado_por: ""
 entorno: dev
 observabilidad:
-  etiqueta_servicio: service   # REVISAR: etiqueta de servicio en las alertas (service/job/container)
-  etiqueta_logs: service       # Loki: container, service, level, environment, cluster
+  etiqueta_servicio: service
+  etiqueta_logs: service       # Loki (X-Scope-OrgID ai-factory): service = nombre compose
+# Cada regla trae el servicio en otra etiqueta, siempre con el nombre compose (rest-api):
+# ContainerUnhealthy/Stopped en service_name; SyntheticProbeFailed y ServiceDown del blackbox en
+# service; ServiceDown y AgentServiceDown en job. Orden: service_name antes que job, porque en las
+# de contenedor job vale docker-healthcheck-exporter.
+webhook:
+  servicio: labels.service_name|labels.service|labels.job
 consultas:
-  # blackbox-exporter prueba el /healthz de cada servicio. REVISAR la etiqueta del target.
-  sonda_http: 'min(probe_success{$etiqueta="$servicio"})'
+  # Scrape directo (job) o sonda del blackbox (service): sano si ambas responden.
+  servicio_responde: 'min(up{job="$servicio"} or probe_success{service="$servicio"})'
   # docker-healthcheck-exporter: 1 sano, 0 unhealthy, -1 sin healthcheck.
-  # REVISAR: nombre real de la etiqueta (container) y el prefijo ia-factory-.
-  contenedor_sano: 'min(iafactory_infra_container_health_status{container="ia-factory-$servicio"})'
+  contenedor_sano: 'min(iafactory_infra_container_health_status{service_name="$servicio"})'
 categorias:
   - id: servicio_caido
     nombre: Servicio sin respuesta
     alertas: [ServiceDown, AgentServiceDown, SyntheticProbeFailed]
     runbook: RB-001
-    senal: {metrica: sonda_http, operador: ">=", umbral: 1}
+    senal: {metrica: servicio_responde, operador: ">=", umbral: 1}
     accion: restart_service
     nivel: 1
   - id: contenedor_fallido

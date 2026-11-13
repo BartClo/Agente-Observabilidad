@@ -98,3 +98,50 @@ def test_cada_servicio_tiene_limite_de_memoria_y_puertos_solo_en_loopback() -> N
 def test_el_worker_corre_con_scheduler_como_en_el_compose_local() -> None:
     comando = " ".join(_compose()["services"]["aiops-worker"]["command"])
     assert "--with-scheduler" in comando
+
+
+# Etiquetas reales de cada regla de AI FACTORY (informe de solo lectura del 2026-11-13).
+@pytest.mark.parametrize(
+    ("labels", "servicio"),
+    [
+        ({"alertname": "ServiceDown", "job": "rest-api", "instance": "rest-api:8000"}, "rest-api"),
+        (
+            {"alertname": "ServiceDown", "job": "blackbox-health", "service": "llm-gateway"},
+            "llm-gateway",
+        ),
+        (
+            {
+                "alertname": "ContainerUnhealthy",
+                "job": "docker-healthcheck-exporter",
+                "service_name": "redis",
+                "container_name": "ia-factory-redis",
+            },
+            "redis",
+        ),
+        (
+            {"alertname": "SyntheticProbeFailed", "job": "blackbox-health", "service": "maya"},
+            "maya",
+        ),
+    ],
+)
+def test_el_servicio_sale_de_la_etiqueta_que_trae_cada_regla(
+    labels: dict[str, str], servicio: str
+) -> None:
+    from infra.alertas_webhook import alertas_con_perfil
+
+    payload = {"alerts": [{"status": "firing", "labels": {**labels, "severity": "critical"}}]}
+    [(alerta, firing)] = alertas_con_perfil(payload, _perfil_aprobado())
+    assert alerta.servicio == servicio and firing
+
+
+def test_las_consultas_filtran_por_la_etiqueta_real_de_cada_metrica() -> None:
+    consultas = _perfil_aprobado().consultas
+    assert 'service_name="{s}"' in consultas["contenedor_sano"]
+    assert 'job="{s}"' in consultas["servicio_responde"]
+    assert 'service="{s}"' in consultas["servicio_responde"]
+
+
+def test_la_cola_del_agente_usa_un_redis_propio_que_no_expulsa_claves() -> None:
+    compose = _compose()
+    assert "aiops-redis" in compose["x-aiops"]["environment"]["REDIS_URL"]
+    assert "noeviction" in compose["services"]["aiops-redis"]["command"]
