@@ -3,7 +3,11 @@
 # reiniciar o recrear vendra por una solicitud que valida una unidad systemd del host.
 # Los valores salen de aiops.env (ver aiops.env.example); nunca se commitea con secretos.
 x-aiops: &aiops
-  image: ${AIOPS_IMAGE:-ghcr.io/aifactory-api-ux/aiops-agent:latest}
+  # Rutas relativas a este archivo: el contexto es la raiz del repositorio.
+  build:
+    context: ../..
+    dockerfile: docker/Dockerfile.app
+  image: ${AIOPS_IMAGE:-aiops-agent:local}
   env_file: [aiops.env]
   environment:
     AIOPS_BACKEND: prometheus
@@ -18,7 +22,7 @@ x-aiops: &aiops
     REDIS_URL: redis://ia-factory-aiops-redis:6379/0
     DATABASE_URL: postgresql://aiops:${AIOPS_DB_PASSWORD:?falta AIOPS_DB_PASSWORD}@ia-factory-aiops-db:5432/aiops
   volumes:
-    - ./perfiles:/perfiles:ro
+    - ../../perfiles:/perfiles:ro
   networks: [ia-factory-network]
   restart: unless-stopped
 

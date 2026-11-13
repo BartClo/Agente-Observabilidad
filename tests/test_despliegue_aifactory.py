@@ -152,3 +152,18 @@ def test_la_api_migra_la_base_antes_de_servir_y_el_worker_la_espera() -> None:
     comando = " ".join(servicios["aiops-agent"]["command"])
     assert comando.index("alembic upgrade head") < comando.index("uvicorn")
     assert servicios["aiops-worker"]["depends_on"]["aiops-agent"]["condition"] == "service_healthy"
+
+
+def test_los_montajes_y_el_build_apuntan_a_rutas_que_existen() -> None:
+    """Compose resuelve las rutas relativas al archivo, no al directorio desde donde se corre."""
+    base = COMPOSE.parent
+    build = _compose()["x-aiops"]["build"]
+    assert (base / build["context"] / build["dockerfile"]).is_file()
+    for volumen in _compose()["x-aiops"]["volumes"]:
+        origen = volumen.split(":")[0]
+        assert (base / origen / PERFIL.name).is_file(), volumen
+
+
+def test_el_archivo_de_secretos_no_entra_ni_a_git_ni_a_la_imagen() -> None:
+    for ignorar in (".gitignore", ".dockerignore"):
+        assert "deploy/aifactory/aiops.env" in (RAIZ / ignorar).read_text(encoding="utf-8")

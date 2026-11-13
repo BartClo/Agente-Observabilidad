@@ -7,3 +7,5 @@
 **/__pycache__
 .env
 k8s-lab
+# Secretos del despliegue en AI FACTORY: se crean a mano en la VM y no pueden quedar en la imagen.
+deploy/aifactory/aiops.env
