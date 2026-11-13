@@ -1,0 +1,36 @@
+# Perfil del entorno dev de AI FACTORY (Docker Compose en la VM iafactory-dev).
+# Fuente: informe de solo lectura del 2026-11-13. Las lineas "REVISAR" no se pudieron
+# confirmar sin acceso a docker ps ni a las etiquetas reales de cada metrica.
+# Arranca en nivel 1 (solo observa, diagnostica y avisa): no hay ejecutor de Compose todavia.
+version: 1
+aprobado: false        # borrador: el responsable lo revisa y pone true + aprobado_por
+aprobado_por: ""
+entorno: dev
+observabilidad:
+  etiqueta_servicio: service   # REVISAR: etiqueta de servicio en las alertas (service/job/container)
+  etiqueta_logs: service       # Loki: container, service, level, environment, cluster
+consultas:
+  # blackbox-exporter prueba el /healthz de cada servicio. REVISAR la etiqueta del target.
+  sonda_http: 'min(probe_success{$etiqueta="$servicio"})'
+  # docker-healthcheck-exporter: 1 sano, 0 unhealthy, -1 sin healthcheck.
+  # REVISAR: nombre real de la etiqueta (container) y el prefijo ia-factory-.
+  contenedor_sano: 'min(iafactory_infra_container_health_status{container="ia-factory-$servicio"})'
+categorias:
+  - id: servicio_caido
+    nombre: Servicio sin respuesta
+    alertas: [ServiceDown, AgentServiceDown, SyntheticProbeFailed]
+    runbook: RB-001
+    senal: {metrica: sonda_http, operador: ">=", umbral: 1}
+    accion: restart_service
+    nivel: 1
+  - id: contenedor_fallido
+    nombre: Contenedor detenido o unhealthy
+    alertas: [ContainerUnhealthy, ContainerStopped]
+    runbook: RB-003
+    senal: {metrica: contenedor_sano, operador: ">=", umbral: 1}
+    accion: restart_service
+    nivel: 1
+# Fuera del catalogo a proposito (las atiende el investigador sin actuar): host, costo, LLM
+# y SLO, porque no se arreglan reiniciando.
+# Sin seccion kubernetes: dev corre en Compose. Sin namespaces permitidos, cualquier accion
+# por Kubernetes se niega antes de llamar a la API.
