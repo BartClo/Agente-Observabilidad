@@ -118,3 +118,33 @@ def _peticion(c: TestClient, cabecera: bool = True) -> Request:
     if cabecera:
         headers.append((b"x-aiops-ui", b"1"))
     return Request({"type": "http", "headers": headers})
+
+
+def test_observabilidad_solo_admin_y_reporta_cada_fuente(
+    cliente: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("AIOPS_LOKI_URL", raising=False)
+    monkeypatch.setenv("AIOPS_PROMETHEUS_URL", "http://127.0.0.1:9")  # nada escucha
+    assert (
+        cliente.get(
+            "/config/observabilidad", headers={"Authorization": "Bearer op-token"}
+        ).status_code
+        == 401
+    )
+    r = cliente.get(
+        "/config/observabilidad", headers={"Authorization": "Bearer admin-token"}
+    ).json()
+    assert [s["nombre"] for s in r] == ["Prometheus", "Loki"]
+    assert r[0]["ok"] is False and r[1] == {
+        "nombre": "Loki",
+        "url": None,
+        "ok": None,
+        "detalle": "no configurado",
+    }
+
+
+def test_la_ui_trae_la_puesta_en_marcha_y_las_tarjetas() -> None:
+    html = (Path(api.__file__).parent / "ui" / "index.html").read_text("utf-8")
+    for id_ in ("setup", "llm-provs", "llm-key", "sec-gchat", "sec-obs", "gchat-probar"):
+        assert f'id="{id_}"' in html
+    assert "llm-filas" not in html  # la tabla vieja de keys ya no existe

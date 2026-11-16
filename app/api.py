@@ -352,6 +352,35 @@ def probar_notificaciones() -> dict[str, Any]:
     return {"ok": True, "detalle": "mensaje enviado"}
 
 
+def _sondear(nombre: str, url: str | None, ruta: str) -> dict[str, Any]:
+    import urllib.request
+
+    if not url:
+        return {"nombre": nombre, "url": None, "ok": None, "detalle": "no configurado"}
+    pedido = urllib.request.Request(url.rstrip("/") + ruta)
+    if org := os.environ.get("AIOPS_OBS_ORG_ID"):
+        pedido.add_header("X-Scope-OrgID", org)
+    try:
+        with urllib.request.urlopen(pedido, timeout=3) as r:  # noqa: S310 (url del operador)
+            return {
+                "nombre": nombre,
+                "url": url,
+                "ok": r.status == 200,
+                "detalle": f"HTTP {r.status}",
+            }
+    except Exception as exc:
+        return {"nombre": nombre, "url": url, "ok": False, "detalle": type(exc).__name__}
+
+
+@app.get("/config/observabilidad", dependencies=_ADMIN)
+def estado_observabilidad() -> list[dict[str, Any]]:
+    """Responden Prometheus y Loki desde el contenedor del agente (no dice nada de los datos)."""
+    return [
+        _sondear("Prometheus", os.environ.get("AIOPS_PROMETHEUS_URL"), "/-/ready"),
+        _sondear("Loki", os.environ.get("AIOPS_LOKI_URL"), "/ready"),
+    ]
+
+
 @app.post("/reconciliar", dependencies=_AUTENTICADO)
 def reconciliar() -> dict[str, list[str]]:
     """Cierra o escala los incidentes que quedaron a medias (ver Ciclo.reconciliar).
