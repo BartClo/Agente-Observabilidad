@@ -308,3 +308,68 @@ def probar(proveedor: str, modelo: str, database_url: str | None = None) -> tupl
         detalle = str(exc).replace(api_key, "***")[:300]
         return False, f"{type(exc).__name__}: {detalle}"
     return True, f"respondio: {str(respuesta.content)[:80]!r}"
+
+
+# Endpoint de "listar modelos" de cada proveedor: (url, cabeceras con la key).
+_LISTADOS: dict[str, Any] = {
+    "anthropic": lambda k: (
+        "https://api.anthropic.com/v1/models?limit=100",
+        {"x-api-key": k, "anthropic-version": "2023-06-01"},
+    ),
+    "openai": lambda k: ("https://api.openai.com/v1/models", {"Authorization": f"Bearer {k}"}),
+    "google": lambda k: (
+        "https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000",
+        {"x-goog-api-key": k},
+    ),
+    "deepseek": lambda k: ("https://api.deepseek.com/models", {"Authorization": f"Bearer {k}"}),
+}
+
+
+def nombres_de_modelos(proveedor: str, datos: dict[str, Any]) -> list[str]:
+    """Del JSON del proveedor, los modelos que sirven para chat, ordenados."""
+    if proveedor == "google":
+        nombres = [
+            m["name"].removeprefix("models/")
+            for m in datos.get("models", [])
+            if "generateContent" in m.get("supportedGenerationMethods", [])
+        ]
+    else:
+        nombres = [m["id"] for m in datos.get("data", []) if "id" in m]
+    if proveedor == "google":  # fuera imagen, voz, musica, robotica, transcripcion
+        ruido = (
+            "image",
+            "tts",
+            "banana",
+            "robotics",
+            "omni",
+            "transcribe",
+            "live",
+            "audio",
+            "embedding",
+        )
+        nombres = [n for n in nombres if n.startswith("gemini-") and not any(r in n for r in ruido)]
+    if proveedor == "openai":  # el listado trae embeddings, audio, imagen...
+        nombres = [n for n in nombres if n.startswith(("gpt-", "o1", "o3", "o4", "chatgpt"))]
+    return sorted(set(nombres), reverse=True)
+
+
+def listar_modelos(
+    proveedor: str, api_key: str | None = None, database_url: str | None = None
+) -> list[str]:
+    """Modelos disponibles para esta key (la recibida o la guardada). Nunca filtra la key."""
+    import json
+    import urllib.request
+
+    p = _proveedor(proveedor)
+    key = api_key or _credencial(p.id, database_url)
+    url, cabeceras = _LISTADOS[p.id](key)
+    try:
+        with urllib.request.urlopen(
+            urllib.request.Request(url, headers=cabeceras), timeout=10
+        ) as r:  # noqa: S310
+            datos = json.loads(r.read())
+    except Exception as exc:
+        raise ConfigLLMError(
+            f"no pude listar modelos: {type(exc).__name__}: {str(exc).replace(key, '***')[:200]}"
+        ) from exc
+    return nombres_de_modelos(p.id, datos)

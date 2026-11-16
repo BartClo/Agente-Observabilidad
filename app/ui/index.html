@@ -271,10 +271,10 @@
         <div class="provs" id="llm-provs" role="group" aria-label="Proveedor"></div>
         <input type="hidden" id="llm-prov">
         <div class="campos">
-          <label>Modelo <input id="llm-modelo" spellcheck="false" list="llm-sugeridos"></label>
+          <label>Modelo <select id="llm-modelo-sel"></select></label>
+          <label id="llm-modelo-otro" hidden>Nombre del modelo <input id="llm-modelo" spellcheck="false"></label>
           <label>API key <input id="llm-key" type="password" autocomplete="off"></label>
         </div>
-        <datalist id="llm-sugeridos"></datalist>
         <div class="barra" style="margin-top:12px"><button id="llm-probar" class="primario">Guardar y probar</button>
           <button id="llm-default">Volver al default</button>
           <span class="espacio"></span><button id="llm-borrar" class="peligro" hidden>Borrar key</button></div>
@@ -534,8 +534,8 @@ const admin = api;
 const SUGERIDOS = {
   anthropic: ["claude-sonnet-5-5", "claude-haiku-5-5"],
   openai: [],
-  google: ["gemini-2.5-flash", "gemini-2.5-pro"],
-  deepseek: ["deepseek-chat"],
+  google: ["gemini-flash-latest", "gemini-2.5-flash"],
+  deepseek: ["deepseek-flash", "deepseek-chat"],
 };
 let cfgLLM = null;
 
@@ -543,15 +543,46 @@ function elegirProveedor(id) {
   $("llm-prov").value = id;
   const p = cfgLLM.proveedores.find((x) => x.id === id);
   for (const b of $("llm-provs").children) b.setAttribute("aria-pressed", String(b.dataset.id === id));
-  const dl = $("llm-sugeridos"); dl.replaceChildren();
-  for (const m of SUGERIDOS[id] || []) { const o = el("option"); o.value = m; dl.append(o); }
-  const activo = cfgLLM.activo.proveedor === id ? cfgLLM.activo.modelo : "";
-  $("llm-modelo").value = activo || (SUGERIDOS[id] || [])[0] || "";
   $("llm-modelo").placeholder = p.ejemplo;
   $("llm-key").value = "";
   $("llm-key").placeholder = p.configurada ? `guardada ••••${p.sufijo} · vacío = conservar` : "pegá la API key";
   $("llm-borrar").hidden = !p.configurada;
+  cargarModelos();
 }
+
+// Lista los modelos que el proveedor ofrece para esa key (la escrita o la guardada).
+const OTRO = "__otro";
+async function cargarModelos() {
+  const id = $("llm-prov").value, key = $("llm-key").value.trim();
+  const p = cfgLLM.proveedores.find((x) => x.id === id);
+  const sel = $("llm-modelo-sel"); sel.replaceChildren();
+  const preferido = (cfgLLM.activo.proveedor === id && cfgLLM.activo.modelo) || (SUGERIDOS[id] || [])[0] || "";
+  const llenar = (modelos, aviso) => {
+    sel.replaceChildren();
+    if (aviso) { const o = el("option", aviso); o.value = ""; o.disabled = true; sel.append(o); }
+    const recomendados = (SUGERIDOS[id] || []).filter((m) => modelos.includes(m));
+    for (const m of [...recomendados, ...modelos.filter((x) => !recomendados.includes(x))]) {
+      const o = el("option", m + (recomendados.includes(m) ? " · recomendado" : "")); o.value = m; sel.append(o);
+    }
+    const o = el("option", "Otro (escribir el nombre)…"); o.value = OTRO; sel.append(o);
+    sel.value = modelos.includes(preferido) ? preferido : (modelos[0] || OTRO);
+    elegirModelo();
+  };
+  if (!key && !p.configurada) { llenar([], "Pegá la API key para ver los modelos"); return; }
+  llenar([], "Cargando modelos…");
+  try {
+    const modelos = await admin("/config/llm/modelos", { method: "POST", body: JSON.stringify({ proveedor: id, api_key: key || null }) });
+    if ($("llm-prov").value === id) llenar(modelos, modelos.length ? "" : "El proveedor no devolvió modelos");
+  } catch (e) { if ($("llm-prov").value === id) llenar([], "No pude listar: " + e.message.slice(0, 60)); }
+}
+function elegirModelo(ev) {
+  const v = $("llm-modelo-sel").value;
+  $("llm-modelo-otro").hidden = v !== OTRO;
+  if (v !== OTRO) $("llm-modelo").value = v;
+  else if (ev) { $("llm-modelo").value = ""; $("llm-modelo").focus(); }
+}
+$("llm-modelo-sel").addEventListener("change", elegirModelo);
+$("llm-key").addEventListener("change", cargarModelos);
 
 function pintarLLM(cfg) {
   cfgLLM = cfg;
