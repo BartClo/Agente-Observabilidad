@@ -12,8 +12,9 @@ propietario: PLACEHOLDER
 **Condiciones de aplicacion:** alerta `DiskUsageHigh`, `disk_usage_percent > 85`,
 crecimiento atribuible a logs rotados.
 
-**Evidencia esperada:** uso de disco alto; directorio de logs con archivos
-rotados sin comprimir.
+**Evidencia esperada:** uso de disco alto confirmado. Si hay logs o eventos que
+muestran archivos rotados sin comprimir la refuerzan; que no haya logs NO la invalida
+(comprimir es reversible).
 
 **Accion autorizada:** `compress_old_logs` (comprime, no borra: es reversible).
 

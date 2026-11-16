@@ -308,3 +308,17 @@ def test_api_probar_sin_webhook(cliente: TestClient, monkeypatch: pytest.MonkeyP
     monkeypatch.setenv("AIOPS_GCHAT_WEBHOOK_URL", "")
     r = cliente.post("/notificaciones/probar", headers={"Authorization": "Bearer admin-token"})
     assert r.status_code == 422
+
+
+def test_escalado_es_corto_y_en_lineas(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AIOPS_UI_URL", "http://ui/ui")
+    inc = _incidente()
+    inc.causa = "El health check del proveedor falla con 404."
+    motivo = "Fuera del catalogo, no se ejecuto ninguna accion. " + "Detalle largo. " * 100
+    texto = avisos.formatear(Evento(1.0, "INC-1", "escalado", {"motivo": motivo}), inc)
+    lineas = texto.split("\n")
+    assert lineas[0].startswith("🔴 *Escalado a L2/SRE* · ServiceDown")
+    assert any(x.startswith("*Causa probable:* El health check") for x in lineas)
+    motivo_linea = next(x for x in lineas if x.startswith("*Motivo:*"))
+    assert len(motivo_linea) < 380 and motivo_linea.endswith(".")  # corta en una oracion
+    assert "Detalle completo: http://ui/ui" in texto and lineas[-1] == "_INC-1_"

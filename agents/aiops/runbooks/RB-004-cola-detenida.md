@@ -12,8 +12,9 @@ propietario: PLACEHOLDER
 **Condiciones de aplicacion:** alerta `QueueStalled`, mensajes acumulandose y
 `queue_consumers_active == 0`.
 
-**Evidencia esperada:** cero consumidores activos; logs del consumidor con
-desconexion o bloqueo.
+**Evidencia esperada:** cero consumidores activos confirmado y ninguna señal de causa
+persistente. Si hay logs del consumidor con desconexion o bloqueo la refuerzan; que no
+haya logs NO la invalida.
 
 **Accion autorizada:** `restart_consumer`.
 

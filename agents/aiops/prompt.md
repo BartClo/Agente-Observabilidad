@@ -34,6 +34,9 @@ politica, el ejecutor y el verificador son tools, no otros agentes.
    - `evidencia_cumplida`: true si lo OBSERVADO cumple la "Evidencia esperada" del runbook.
      No hace falta saber la causa raiz exacta (por que se cayo): basta con que lo observado
      coincida con lo que el runbook describe.
+     La falta de logs (consulta vacia) NO es evidencia en contra: si la metrica confirma la
+     falla y el estado del pod o contenedor no muestra una causa persistente, la evidencia
+     se cumple.
    - `condiciones_escalar`: solo las condiciones de "Escalar si" que VISTE (metricas, logs,
      eventos o un documento con un cambio concreto en las horas previas en ese servicio),
      cada una con lo que viste. Que algo *podria* estar pasando, o que paso en un incidente

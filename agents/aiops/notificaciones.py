@@ -35,50 +35,67 @@ def es_hito(evento: Evento) -> bool:
     return evento.tipo in HITOS
 
 
+def _corto(texto: str, maximo: int) -> str:
+    """Primeras oraciones que entran en `maximo`: Chat es un aviso, el detalle va en la UI."""
+    texto = limpiar(texto, 10_000)
+    if len(texto) <= maximo:
+        return texto
+    corte = texto.rfind(". ", 0, maximo)
+    return texto[: corte + 1] if corte > maximo // 3 else texto[: maximo - 1] + "…"
+
+
 def formatear(evento: Evento, inc: Incidente | None) -> str:
-    """Mensaje de Google Chat (*negrita*, `codigo`). Todo texto que viene de alertas,
-    logs o del LLM pasa por `limpiar()`."""
+    """Mensaje de Google Chat (*negrita*, `codigo`), corto y en lineas: titulo, servicio,
+    lo esencial y el enlace a la UI. Todo texto de alertas, logs o del LLM pasa por
+    `limpiar()`."""
     d = evento.datos
     ui = os.environ.get("AIOPS_UI_URL", "").strip()
-    pie = f"\n{ui}" if ui else ""
-    ident = f"`{limpiar(evento.incidente_id, 120)}`"
-    donde = ""
+    lineas: list[str] = []
+    alerta = ""
     if inc is not None:
         a = inc.alerta
-        donde = f"{limpiar(a.nombre, 80)} en `{limpiar(a.servicio, 63)}` ({limpiar(a.entorno, 20)})"
+        alerta = f" · {limpiar(a.nombre, 80)}"
+        lineas.append(f"*Servicio:* `{limpiar(a.servicio, 63)}` ({limpiar(a.entorno, 20)})")
     if evento.tipo == "abierto":
-        sev = f" · severidad {inc.alerta.severidad}" if inc else ""
-        return f"🚨 *Incidente abierto* {ident}\n{donde}{sev}"
-    if evento.tipo == "accion":
+        titulo = "🚨 *Incidente abierto*"
+        if inc is not None:
+            lineas.append(f"*Severidad:* {limpiar(inc.alerta.severidad, 20)}")
+    elif evento.tipo == "accion":
         ok = "✅ ok" if d.get("ok") else "❌ falló"
-        accion = limpiar(str(d.get("accion", "?")), 60)
-        detalle = limpiar(str(d.get("resultado", "")), 300)
-        return f"🔧 *Acción ejecutada* {ident}: `{accion}` {ok}\n{detalle}"
-    if evento.tipo == "escalado":
-        return (
-            f"🔴 *Escalado a L2/SRE* {ident}\n{donde}\n"
-            f"Motivo: {limpiar(str(d.get('motivo', '')), 1200)}{pie}"
-        )
-    if evento.tipo == "cerrado":
+        titulo = "🔧 *Acción ejecutada*"
+        lineas.append(f"*Acción:* `{limpiar(str(d.get('accion', '?')), 60)}` {ok}")
+        if d.get("resultado"):
+            lineas.append(f"*Resultado:* {_corto(str(d['resultado']), 200)}")
+    elif evento.tipo == "escalado":
+        titulo = "🔴 *Escalado a L2/SRE*"
+        if inc is not None and inc.causa:
+            lineas.append(f"*Causa probable:* {_corto(inc.causa, 300)}")
+        lineas.append(f"*Motivo:* {_corto(str(d.get('motivo', '')), 350)}")
+    elif evento.tipo == "cerrado":
+        titulo = "✅ *Resuelto*"
         quien = "sin intervención humana" if d.get("autonomo") else "con intervención humana"
-        tiempo = ""
         if inc is not None and inc.cerrado_en is not None:
             inicio = inc.alerta.disparada_en or inc.abierto_en
-            tiempo = f" · {inc.cerrado_en - inicio:.0f} s desde la alerta"
-        return f"✅ *Resuelto* {ident} {quien}{tiempo}\n{donde}"
-    if evento.tipo == "reconciliado":
-        return (
-            f"🛠️ *Reconciliado* {ident} → {limpiar(str(d.get('destino', '?')), 20)}: "
-            f"quedó sin cierre {float(d.get('edad_s', 0)):.0f} s\n{donde}"
+            quien += f" · {inc.cerrado_en - inicio:.0f} s desde la alerta"
+        lineas.append(f"*Cómo:* {quien}")
+    elif evento.tipo == "reconciliado":
+        titulo = "🛠️ *Reconciliado*"
+        lineas.append(
+            f"*Estado:* {limpiar(str(d.get('destino', '?')), 20)} · quedó sin cierre "
+            f"{float(d.get('edad_s', 0)):.0f} s"
         )
-    if evento.tipo == "decision_politica":  # veredicto "aprobacion"
-        razones = limpiar("; ".join(str(r) for r in d.get("razones", [])), 300)
-        return (
-            f"⏳ *Necesita tu aprobación* {ident}\n{donde}\n"
-            f"Acción `{limpiar(str(d.get('accion', '?')), 60)}`: {razones}\n"
-            f"Aprobar o rechazar en la UI.{pie}"
-        )
-    return f"ℹ️ {limpiar(evento.tipo, 40)} {ident}"
+    elif evento.tipo == "decision_politica":  # veredicto "aprobacion"
+        titulo = "⏳ *Necesita tu aprobación*"
+        razones = "; ".join(str(r) for r in d.get("razones", []))
+        lineas.append(f"*Acción:* `{limpiar(str(d.get('accion', '?')), 60)}`")
+        lineas.append(f"*Por qué:* {_corto(razones, 300)}")
+        lineas.append("Aprobar o rechazar en la UI.")
+    else:
+        titulo = f"ℹ️ {limpiar(evento.tipo, 40)}"
+    if ui and evento.tipo in ("escalado", "decision_politica"):
+        lineas.append(f"Detalle completo: {ui}")
+    lineas.append(f"_{limpiar(evento.incidente_id, 120)}_")
+    return "\n".join([titulo + alerta, *lineas])
 
 
 def crear_sink(

@@ -12,8 +12,9 @@ propietario: PLACEHOLDER
 **Condiciones de aplicacion:** alerta `ServiceDown`, metrica `up` en 0, sin
 despliegue en curso ni mantenimiento programado.
 
-**Evidencia esperada:** `up == 0`; logs con salida abrupta del proceso (OOM,
-excepcion no capturada o señal de terminacion).
+**Evidencia esperada:** `up == 0` confirmado y ninguna señal de causa persistente
+(imagen o configuracion rota). Si hay logs con salida abrupta (OOM, excepcion, señal de
+terminacion) la refuerzan; que no haya logs NO la invalida.
 
 **Accion autorizada:** `restart_service` (una vez; maximo 2 intentos por politica).
 

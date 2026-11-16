@@ -13,7 +13,7 @@ propietario: PLACEHOLDER
 gestionado por un controlador que lo repone.
 
 **Evidencia esperada:** `pod_ready == 0`, con el contenedor reiniciandose (reinicios
-crecientes) o sin pasar la readiness probe (eventos `Unhealthy`).
+crecientes) o sin pasar la readiness probe (eventos `Unhealthy`). No hacen falta logs.
 
 **Accion autorizada:** `recreate_pod` (elimina el pod; el controlador crea uno nuevo).
 
