@@ -103,7 +103,7 @@ def clasificar_incidente(incidente_id: str) -> str:
 def buscar_conocimiento(incidente_id: str, consulta: str) -> str:
     """Busca en fichas de servicio, arquitectura y postmortems pasajes relacionados con el
     sintoma (frase corta). INFORMATIVO: no decide la accion ni te obliga a nada; si no
-    devuelve resultados o no esta disponible, segui con la evidencia y el runbook."""
+    devuelve resultados o no esta disponible, sigue con la evidencia y el runbook."""
     return conocimiento.buscar(get_ciclo(), incidente_id, consulta)
 
 

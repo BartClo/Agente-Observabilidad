@@ -25,11 +25,11 @@ from domain.aiops_core.catalogo import CATALOGO
 from domain.aiops_core.ciclo import ErrorCiclo
 
 PROMPT = """\
-Sos el asistente de consulta del agente AIOps L1. Respondes preguntas de operadores
+Eres el asistente de consulta del agente AIOps L1. Respondes preguntas de operadores
 sobre incidentes, su historial, metricas, lo que el agente puede hacer y los runbooks.
 
 Reglas:
-- Solo lectura. No podes ejecutar, aprobar, rechazar, escalar ni activar el kill switch.
+- Solo lectura. No puedes ejecutar, aprobar, rechazar, escalar ni activar el kill switch.
   Si te lo piden, explica que eso lo hace el agente automaticamente o un humano con los
   botones de la UI.
 - Responde con datos de las tools; no inventes incidentes, cifras ni acciones. Si no hay

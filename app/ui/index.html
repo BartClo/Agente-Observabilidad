@@ -173,7 +173,7 @@
     <section class="panel" id="sec-llm" aria-labelledby="llm-titulo">
       <div class="cabeza"><h2 id="llm-titulo">Modelo del agente</h2><span class="espacio"></span>
         <span id="llm-activo" class="chip"></span></div>
-      <p class="sub" style="margin:0" id="llm-pista">Elegí proveedor, pegá la key y pulsá «Guardar y probar»: se prueba con una llamada real y solo queda en uso si responde.</p>
+      <p class="sub" style="margin:0" id="llm-pista">Elige proveedor, pega la key y pulsa «Guardar y probar»: se prueba con una llamada real y solo queda en uso si responde.</p>
       <div id="llm-cuerpo" hidden>
         <div class="provs" id="llm-provs" role="group" aria-label="Proveedor"></div>
         <input type="hidden" id="llm-prov">
@@ -408,7 +408,7 @@ function elegirProveedor(id) {
   for (const b of $("llm-provs").children) b.setAttribute("aria-pressed", String(b.dataset.id === id));
   $("llm-modelo").placeholder = p.ejemplo;
   $("llm-key").value = "";
-  $("llm-key").placeholder = p.configurada ? `guardada ••••${p.sufijo} · vacío = conservar` : "pegá la API key";
+  $("llm-key").placeholder = p.configurada ? `guardada ••••${p.sufijo} · vacío = conservar` : "pega la API key";
   $("llm-borrar").hidden = !p.configurada;
   cargarModelos();
 }
@@ -431,7 +431,7 @@ async function cargarModelos() {
     sel.value = modelos.includes(preferido) ? preferido : (modelos[0] || OTRO);
     elegirModelo();
   };
-  if (!key && !p.configurada) { llenar([], "Pegá la API key para ver los modelos"); return; }
+  if (!key && !p.configurada) { llenar([], "Pega la API key para ver los modelos"); return; }
   llenar([], "Cargando modelos…");
   try {
     const modelos = await admin("/config/llm/modelos", { method: "POST", body: JSON.stringify({ proveedor: id, api_key: key || null }) });
@@ -509,7 +509,7 @@ async function cargarChat() {
     estadoChat = await api("/notificaciones");
     $("gchat-estado").textContent = estadoChat.configurado
       ? `Webhook configurado en el servidor · enviados ${estadoChat.enviados ?? 0} · pendientes ${estadoChat.pendientes ?? 0} · fallidos ${estadoChat.fallidos ?? 0}`
-      : "Sin webhook: definí AIOPS_GCHAT_WEBHOOK_URL en aiops.env y reiniciá el agente.";
+      : "Sin webhook: define AIOPS_GCHAT_WEBHOOK_URL en aiops.env y reinicia el agente.";
     $("gchat-probar").disabled = !estadoChat.configurado;
   } catch (e) { $("gchat-estado").textContent = "Error: " + e.message; }
   pintarSetup();
@@ -549,7 +549,7 @@ $("resp-quitar").addEventListener("click", () => accionLLM("/config/llm/respaldo
 // responde la deja en uso.
 $("llm-probar").addEventListener("click", async () => {
   const proveedor = $("llm-prov").value, modelo = $("llm-modelo").value.trim(), key = $("llm-key").value.trim();
-  if (!modelo) { resultado("llm-resultado", false, "Indicá el modelo."); return; }
+  if (!modelo) { resultado("llm-resultado", false, "Indica el modelo."); return; }
   resultado("llm-resultado", null, "Probando…");
   try {
     if (key) await admin(`/config/llm/credenciales/${proveedor}`, { method: "PUT", body: JSON.stringify({ api_key: key, usuario: usuarioActual() }) });
