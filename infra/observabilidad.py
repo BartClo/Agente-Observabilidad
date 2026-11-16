@@ -182,11 +182,19 @@ class InvestigacionPrometheus:
     """`InvestigacionPort` con las consultas `investigacion:` del perfil: el estado del
     contenedor visto por Prometheus (exportador de la plataforma), sin acceso a Docker."""
 
-    def __init__(self, obs: PrometheusLoki, consultas: Mapping[str, str]) -> None:
-        self._obs, self._consultas = obs, dict(consultas)
+    def __init__(
+        self, obs: PrometheusLoki, consultas: Mapping[str, str], extra: Any = None
+    ) -> None:
+        # `extra`: otra InvestigacionPort (p. ej. docker inspect via el ejecutor del host).
+        self._obs, self._consultas, self._extra = obs, dict(consultas), extra
 
     def eventos(self, servicio: str, maximo: int) -> list[str]:
         lineas: list[str] = []
+        if self._extra is not None:
+            try:
+                lineas += [f"contenedor: {x}" for x in self._extra.eventos(servicio, maximo)]
+            except (RuntimeError, OSError) as exc:
+                lineas.append(f"contenedor: no disponible ({exc})")
         for nombre, plantilla in self._consultas.items():
             series = self._obs.series(plantilla, servicio)
             if not series:

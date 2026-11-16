@@ -48,6 +48,7 @@ class AgenteFalso:
 
 @pytest.fixture
 def incidente(monkeypatch: pytest.MonkeyPatch) -> Iterator[tuple[Any, str, Alerta]]:
+    monkeypatch.setenv("AIOPS_EVIDENCIA_PREVIA", "0")  # agentes falsos: sin lecturas previas
     ciclo = runtime.armar(persistencia="postgres")
     alerta = Alerta("resp-1", "ServiceDown", "checkout", "dev", Severidad.ALTA, "r")
     inc = ciclo.abrir_desde_alerta(alerta)

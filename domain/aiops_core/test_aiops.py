@@ -1068,3 +1068,51 @@ def test_alertas_del_mismo_servicio_se_agrupan_en_un_incidente() -> None:
     inc2.estado = Estado.RESUELTO
     ciclo._guardar(inc2)
     assert ciclo.agrupar(otra, 900) is None
+
+
+def _diagnosticar(ciclo: Ciclo, alerta_id: str, **kw: object) -> str:
+    inc = ciclo.abrir(alerta_id)
+    ciclo.confirmar_anomalia(inc.id)
+    categoria, _, _ = ciclo.clasificar(inc.id)
+    assert categoria is not None
+    ciclo.registrar_diagnostico(inc.id, "causa", 0.1, categoria.runbook_id, **kw)  # type: ignore[arg-type]
+    return inc.id
+
+
+def test_modo_evidencia_la_confianza_la_calcula_el_sistema() -> None:
+    ciclo, env, a = armar()
+    # Declaro 0.1, pero la evidencia se cumple y no hay condiciones: actua.
+    inc_id = _diagnosticar(ciclo, a, evidencia_cumplida=True, condiciones_escalar=[" ", ""])
+    assert ciclo.incidente(inc_id).confianza == 0.9
+    assert ciclo.ejecutar_remediacion(inc_id, aprobada=False).veredicto is Veredicto.PERMITIR
+    diag = [e for e in ciclo.auditoria.de_incidente(inc_id) if e.tipo == "diagnostico"][0]
+    assert diag.datos["confianza_declarada"] == 0.1 and diag.datos["condiciones_escalar"] == []
+
+
+@pytest.mark.parametrize(
+    "kw",
+    [
+        {"evidencia_cumplida": False},
+        {"evidencia_cumplida": True, "condiciones_escalar": ["logs: error de configuracion"]},
+    ],
+)
+def test_modo_evidencia_sin_evidencia_o_con_condicion_escala(kw: dict[str, object]) -> None:
+    ciclo, env, a = armar()
+    inc_id = _diagnosticar(ciclo, a, **kw)
+    assert ciclo.incidente(inc_id).confianza == 0.5
+    assert ciclo.ejecutar_remediacion(inc_id, aprobada=False).veredicto is Veredicto.DENEGAR
+    assert env.acciones_ejecutadas == []
+
+
+def test_modo_evidencia_detecta_causa_persistente_sin_el_llm() -> None:
+    ciclo, env, a = armar()
+
+    class _Inv:
+        def eventos(self, servicio: str, maximo: int) -> list[str]:
+            return ["pod api-1: Waiting ImagePullBackOff"]
+
+    ciclo._investigacion = _Inv()
+    inc_id = _diagnosticar(ciclo, a, evidencia_cumplida=True)
+    assert ciclo.incidente(inc_id).confianza == 0.5
+    diag = [e for e in ciclo.auditoria.de_incidente(inc_id) if e.tipo == "diagnostico"][0]
+    assert "ImagePullBackOff" in diag.datos["condiciones_escalar"][0]

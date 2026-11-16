@@ -30,6 +30,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 ACCIONES = {"restart_service", "restart_consumer"}
+LECTURA = {"inspeccionar"}  # solo lectura: sin limite por hora
 NOMBRE = re.compile(r"^[A-Za-z0-9_.-]{1,63}$")
 ID = re.compile(r"^[0-9a-f]{32}$")
 
@@ -65,7 +66,7 @@ class Ejecutor:
 
     def decidir(self, pedido: dict[str, object], ahora: float) -> tuple[bool, str]:
         accion, servicio = pedido.get("accion"), pedido.get("servicio")
-        if accion not in ACCIONES:
+        if accion not in ACCIONES | LECTURA:
             return False, f"accion no permitida en el host: {accion!r}"
         if not isinstance(servicio, str) or not NOMBRE.fullmatch(servicio):
             return False, "nombre de servicio invalido"
@@ -74,6 +75,8 @@ class Ejecutor:
         ts = pedido.get("ts")
         if not isinstance(ts, (int, float)) or ahora - ts > self.vence_s:
             return False, "solicitud vencida"
+        if accion in LECTURA:
+            return self._inspeccionar(self.prefijo + servicio)
         recientes = [t for t in self._historial[servicio] if ahora - t < 3600]
         self._historial[servicio] = recientes
         if len(recientes) >= self.max_por_hora:
@@ -87,6 +90,34 @@ class Ejecutor:
             )
         self._historial[servicio].append(ahora)
         return True, f"docker restart {contenedor}: ok"
+
+    def _inspeccionar(self, contenedor: str) -> tuple[bool, str]:
+        r = self._correr(["docker", "inspect", contenedor])
+        if r.returncode != 0:
+            return (
+                False,
+                f"docker inspect {contenedor} fallo: {(r.stderr or r.stdout).strip()[:300]}",
+            )
+        try:
+            datos = json.loads(r.stdout)[0]
+        except (ValueError, IndexError, KeyError) as exc:
+            return False, f"docker inspect ilegible: {exc}"
+        e = datos.get("State", {})
+        salud = e.get("Health") or {}
+        lineas = [
+            f"estado={e.get('Status')} codigo_salida={e.get('ExitCode')} "
+            f"oom={e.get('OOMKilled')} reinicios={datos.get('RestartCount')}",
+            f"iniciado={e.get('StartedAt')} terminado={e.get('FinishedAt')}",
+        ]
+        if e.get("Error"):
+            lineas.append(f"error={e['Error'][:200]}")
+        if salud:
+            ultimo = (salud.get("Log") or [{}])[-1]
+            lineas.append(
+                f"healthcheck={salud.get('Status')} fallos_seguidos={salud.get('FailingStreak')} "
+                f"ultimo={str(ultimo.get('Output', '')).strip()[:200]}"
+            )
+        return True, "\n".join(lineas)
 
     def procesar_pendientes(self, ahora: float | None = None) -> int:
         self.res.mkdir(parents=True, exist_ok=True)

@@ -41,7 +41,7 @@ def recorrer(alerta_id: str, categoria: str) -> str:
     clasif = tools.clasificar_incidente(inc_id)
     if "NO elegible" in clasif:
         return tools.escalar_a_humano(inc_id, clasif)
-    tools.registrar_diagnostico(inc_id, "causa conocida", 0.9, RUNBOOK[categoria])
+    tools.registrar_diagnostico(inc_id, "causa conocida", RUNBOOK[categoria], True)
     res = tools.ejecutar_remediacion(inc_id)
     if res.startswith("DENEGADO"):
         return tools.escalar_a_humano(inc_id, res)

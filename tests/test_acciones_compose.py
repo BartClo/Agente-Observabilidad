@@ -145,3 +145,45 @@ def test_solicitud_ilegible_o_con_id_raro_no_ejecuta(tmp_path: Path) -> None:
 def test_sin_archivo_de_permitidos_no_se_reinicia_nada(tmp_path: Path) -> None:
     e = ejecutor_mod.Ejecutor(tmp_path / "sol", tmp_path / "no-existe", correr=_Docker())
     assert not e.decidir(_pedido(), 1000.0)[0]
+
+
+def test_inspeccionar_resume_el_estado_sin_limite_ni_reinicio(tmp_path: Path) -> None:
+    salida = json.dumps(
+        [
+            {
+                "RestartCount": 2,
+                "State": {
+                    "Status": "exited",
+                    "ExitCode": 137,
+                    "OOMKilled": True,
+                    "StartedAt": "a",
+                    "FinishedAt": "b",
+                    "Health": {"Status": "unhealthy", "FailingStreak": 3, "Log": [{"Output": "x"}]},
+                },
+            }
+        ]
+    )
+
+    class _Inspect(_Docker):
+        def __call__(self, cmd: list[str]) -> subprocess.CompletedProcess[str]:
+            self.comandos.append(cmd)
+            return subprocess.CompletedProcess(cmd, 0, salida, "")
+
+    docker = _Inspect()
+    e = _ejecutor(tmp_path, docker)
+    for _ in range(5):  # lectura: no cuenta para el limite de reinicios
+        ok, detalle = e.decidir(_pedido(accion="inspeccionar"), 1000.0)
+        assert ok
+    assert "codigo_salida=137 oom=True reinicios=2" in detalle
+    assert "healthcheck=unhealthy" in detalle
+    assert all(c[:2] == ["docker", "inspect"] for c in docker.comandos)
+    assert not e.decidir(_pedido(accion="inspeccionar", servicio="postgres"), 1000.0)[0]
+
+
+def test_el_backend_expone_el_inspect_como_investigacion(tmp_path: Path) -> None:
+    from domain.aiops_core.observabilidad import InvestigacionPort
+
+    backend = BackendSolicitudes(tmp_path / "sol", intervalo_s=0.05)
+    assert isinstance(backend, InvestigacionPort)
+    with pytest.raises(RuntimeError):  # sin ejecutor: error legible, no cuelga
+        backend.eventos("frontend", 5)

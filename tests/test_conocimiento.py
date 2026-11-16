@@ -135,10 +135,10 @@ def test_tool_rechaza_una_cita_inventada(
     c.clasificar(inc_id)
     conocimiento.buscar(c, inc_id, "checkout")
     assert "ERROR: fuente no recuperada: C999" in tools.registrar_diagnostico(
-        inc_id, "causa", 0.9, "RB-001", fuentes="C7, C999"
+        inc_id, "causa", "RB-001", True, fuentes="C7, C999"
     )
     assert "Diagnostico registrado" in tools.registrar_diagnostico(
-        inc_id, "causa", 0.9, "RB-001", fuentes="C7"
+        inc_id, "causa", "RB-001", True, fuentes="C7"
     )
     assert c.incidente(inc_id).fuentes_citadas == ["C7"]
 

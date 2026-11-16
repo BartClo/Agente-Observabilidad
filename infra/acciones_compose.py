@@ -18,6 +18,8 @@ import time
 import uuid
 from pathlib import Path
 
+from domain.aiops_core.acciones import validar_servicio
+
 
 class BackendSolicitudes:
     def __init__(self, directorio: str | Path, intervalo_s: float = 0.5) -> None:
@@ -32,6 +34,17 @@ class BackendSolicitudes:
     def ejecutar(self, accion: str, servicio: str, timeout_s: int) -> str:
         """`accion` y `servicio` ya llegan validados por ejecutar_accion (lista autorizada y
         nombre seguro). El ejecutor del host los vuelve a validar: no confia en el agente."""
+        return self._pedir(accion, servicio, timeout_s)
+
+    def eventos(self, servicio: str, maximo: int) -> list[str]:
+        """InvestigacionPort: `docker inspect` resumido (estado, codigo de salida, OOM,
+        reinicios, healthcheck) que hace el ejecutor del host. Solo lectura."""
+        try:
+            return self._pedir("inspeccionar", validar_servicio(servicio), 15).splitlines()[:maximo]
+        except (TimeoutError, ValueError) as exc:
+            raise RuntimeError(str(exc)) from exc
+
+    def _pedir(self, accion: str, servicio: str, timeout_s: int) -> str:
         self._pend.mkdir(parents=True, exist_ok=True)
         id_ = uuid.uuid4().hex
         pedido = {"id": id_, "accion": accion, "servicio": servicio, "ts": time.time()}

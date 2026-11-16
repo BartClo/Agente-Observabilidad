@@ -109,14 +109,34 @@ def buscar_conocimiento(incidente_id: str, consulta: str) -> str:
 
 @_seguro
 def registrar_diagnostico(
-    incidente_id: str, causa: str, confianza: float, runbook_id: str, fuentes: str = ""
+    incidente_id: str,
+    causa: str,
+    runbook_id: str,
+    evidencia_cumplida: bool,
+    condiciones_escalar: str = "",
+    fuentes: str = "",
 ) -> str:
-    """Registra la causa probable, la confianza (0 a 1) y el runbook que la respalda.
-    El runbook debe ser el que devolvio clasificar_incidente. `fuentes`: ids [C..] de
-    buscar_conocimiento que realmente usaste, separados por coma (vacio si ninguno)."""
+    """Registra la causa probable y el runbook (el que devolvio clasificar_incidente).
+    `evidencia_cumplida`: true si lo OBSERVADO cumple la "Evidencia esperada" del runbook.
+    `condiciones_escalar`: condiciones de "Escalar si" que OBSERVASTE, separadas por ";",
+    cada una con lo que viste (vacio si ninguna). La confianza la calcula el sistema a partir
+    de esto. `fuentes`: ids [C..] de buscar_conocimiento que usaste, separados por coma."""
     citadas = [f.strip() for f in fuentes.split(",") if f.strip()]
-    get_ciclo().registrar_diagnostico(incidente_id, causa, confianza, runbook_id, fuentes=citadas)
-    return f"Diagnostico registrado para {incidente_id}. Siguiente: ejecutar_remediacion."
+    ciclo = get_ciclo()
+    ciclo.registrar_diagnostico(
+        incidente_id,
+        causa,
+        0.0,
+        runbook_id,
+        fuentes=citadas,
+        evidencia_cumplida=evidencia_cumplida,
+        condiciones_escalar=condiciones_escalar.split(";"),
+    )
+    inc = ciclo.incidente(incidente_id)
+    return (
+        f"Diagnostico registrado para {incidente_id}, confianza {inc.confianza:.2f}. "
+        "Siguiente: ejecutar_remediacion."
+    )
 
 
 @_seguro

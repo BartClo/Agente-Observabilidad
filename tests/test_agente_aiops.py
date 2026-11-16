@@ -105,3 +105,28 @@ def test_las_tools_de_ejecucion_no_aceptan_una_accion_del_llm(nombre: str) -> No
     from agents.aiops import tools
 
     assert list(inspect.signature(getattr(tools, nombre)).parameters) == ["incidente_id"]
+
+
+def test_pedido_con_evidencia_trae_las_lecturas_ya_hechas(monkeypatch: pytest.MonkeyPatch) -> None:
+    from agents.aiops import tools, worker_jobs
+
+    monkeypatch.setattr(tools, "confirmar_anomalia", lambda i: "CONFIRMADA: up=0")
+    monkeypatch.setattr(tools, "clasificar_incidente", lambda i: "Categoria x, ELEGIBLE. RB-001")
+    monkeypatch.setattr(tools, "consultar_logs", lambda i, n: "linea de log")
+    monkeypatch.setattr(tools, "consultar_eventos", lambda i: "ERROR: no disponible")
+    from agents.aiops import runtime
+    from domain.aiops_core.modelos import Estado
+
+    monkeypatch.setattr(
+        runtime,
+        "get_ciclo",
+        lambda: type(
+            "C", (), {"incidente": lambda s, i: type("I", (), {"estado": Estado.ABIERTO})()}
+        )(),
+    )
+    alerta = type("A", (), {"nombre": "ServiceDown", "servicio": "checkout", "entorno": "dev"})()
+    pedido = worker_jobs.pedido_con_evidencia("INC-1", alerta)
+    assert "CONFIRMADA: up=0" in pedido and "RB-001" in pedido and "linea de log" in pedido
+    assert "consultar_eventos" not in pedido  # el ERROR no se le pasa como evidencia
+    monkeypatch.setenv("AIOPS_EVIDENCIA_PREVIA", "0")
+    assert "empieza por confirmar_anomalia" in worker_jobs.pedido_con_evidencia("INC-1", alerta)

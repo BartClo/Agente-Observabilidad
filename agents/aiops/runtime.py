@@ -75,12 +75,14 @@ def armar(*, persistencia: str | None = None) -> Ciclo:
     investigacion: InvestigacionPort | None = (
         backend if isinstance(backend, InvestigacionPort) else None
     )
-    if investigacion is None and perfil is not None and perfil.investigacion:
+    if perfil is not None and perfil.investigacion:
         # Sin eventos del orquestador (Compose): el estado del contenedor via Prometheus.
         from infra.observabilidad import InvestigacionPrometheus, PrometheusLoki
 
         if isinstance(observabilidad, PrometheusLoki):
-            investigacion = InvestigacionPrometheus(observabilidad, perfil.investigacion)
+            investigacion = InvestigacionPrometheus(
+                observabilidad, perfil.investigacion, extra=investigacion
+            )
     politica = politica_desde_entorno()
     if perfil is not None:
         # El entorno solo acota: AIOPS_ALLOWED_ENVS y AIOPS_AUTONOMY_LEVEL siguen siendo el

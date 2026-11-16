@@ -8,6 +8,7 @@ solo se cierra como resuelto si la recuperacion fue verificada.
 
 from __future__ import annotations
 
+import re
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -28,6 +29,14 @@ from domain.aiops_core.observabilidad import InvestigacionPort, ObservabilidadPo
 from domain.aiops_core.politicas import Politica, Veredicto
 from domain.aiops_core.repositorio import RepositorioIncidentes, RepositorioIncidentesMemoria
 from domain.aiops_core.saneamiento import sanear_linea
+
+# Modo evidencia (registrar_diagnostico): la confianza la fija el sistema, no el LLM.
+CONFIANZA_CON_EVIDENCIA = 0.9
+CONFIANZA_SIN_EVIDENCIA = 0.5
+_CAUSA_PERSISTENTE = re.compile(
+    r"ImagePullBackOff|ErrImagePull|InvalidImageName|CreateContainerConfigError|"
+    r"CreateContainerError|RunContainerError"
+)
 
 
 class ErrorCiclo(ValueError):
@@ -161,6 +170,31 @@ class Ciclo:
             return existente
         return self._abrir_o_reusar(alerta, origen="webhook")
 
+    def _condiciones_detectadas(self, inc: Incidente) -> list[str]:
+        """Condiciones de escalar que se comprueban sin el LLM: no dependen de que el
+        modelo las note. Recurrencia (reiniciar ya no alcanza) y causas persistentes que
+        el orquestador informa (imagen o configuracion rota: reiniciar no las arregla)."""
+        condiciones = []
+        ahora = self._reloj()
+        previas = [
+            i
+            for i in self._repo.listar()
+            if i.id != inc.id
+            and i.alerta.servicio == inc.alerta.servicio
+            and i.resuelto_autonomo
+            and ahora - i.abierto_en < 3600
+        ]
+        if len(previas) >= 2:
+            condiciones.append(f"recurrente: {len(previas)} remediaciones en la ultima hora")
+        if self._investigacion is not None:
+            try:
+                eventos = " ".join(self._investigacion.eventos(inc.alerta.servicio, 50))
+            except (RuntimeError, OSError):
+                eventos = ""
+            if m := _CAUSA_PERSISTENTE.search(eventos):
+                condiciones.append(f"causa persistente en eventos: {m.group(0)}")
+        return condiciones
+
     def agrupar(self, alerta: Alerta, ventana_s: float) -> Incidente | None:
         """Una caida dispara varias reglas a la vez (ServiceDown, ContainerUnhealthy, sonda
         sintetica...). Si OTRA alerta del mismo servicio ya tiene un incidente en curso, o uno
@@ -278,9 +312,26 @@ class Ciclo:
         confianza: float,
         runbook_id: str,
         fuentes: list[str] | None = None,
+        *,
+        evidencia_cumplida: bool | None = None,
+        condiciones_escalar: list[str] | None = None,
     ) -> None:
+        """Con `evidencia_cumplida` (modo evidencia), la confianza NO es la que declara el
+        LLM: la calcula el sistema. Alta solo si lo observado cumple la evidencia esperada
+        del runbook y no hay ninguna condicion de escalar, ni declarada ni detectada aca.
+        La declarada queda en la auditoria. Sin el argumento, comportamiento anterior."""
         inc = self.incidente(incidente_id)
         categoria = self._categoria(inc)
+        declarada = confianza
+        condiciones: list[str] = []
+        if evidencia_cumplida is not None:
+            condiciones = [c.strip() for c in condiciones_escalar or [] if c.strip()]
+            condiciones += self._condiciones_detectadas(inc)
+            confianza = (
+                CONFIANZA_CON_EVIDENCIA
+                if evidencia_cumplida and not condiciones
+                else (CONFIANZA_SIN_EVIDENCIA)
+            )
         citadas = list(fuentes or [])
         for f in citadas:
             if f not in inc.fuentes_recuperadas:
@@ -303,6 +354,9 @@ class Ciclo:
             confianza=confianza,
             runbook=runbook_id,
             fuentes=citadas,
+            confianza_declarada=declarada,
+            evidencia_cumplida=evidencia_cumplida,
+            condiciones_escalar=condiciones,
         )
 
     def ejecutar_remediacion(self, incidente_id: str, *, aprobada: bool) -> ResultadoEjecucion:
