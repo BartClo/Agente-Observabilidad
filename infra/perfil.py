@@ -73,6 +73,9 @@ class Perfil:
     servicios: frozenset[str] | None = None
     webhook: MapeoWebhook = MapeoWebhook()
     kubernetes: Kubernetes = Kubernetes()
+    # PromQL de solo lectura que describen el estado del servicio (p. ej. el contenedor en
+    # Compose, donde no hay eventos de Kubernetes). Alimentan `consultar_eventos`.
+    investigacion: dict[str, str] = field(default_factory=dict)
 
 
 def _dict(valor: Any, donde: str) -> dict[str, Any]:
@@ -190,7 +193,7 @@ def parsear(datos: Any) -> Perfil:
         datos,
         {
             "version", "aprobado", "aprobado_por", "entorno", "observabilidad", "consultas",
-            "categorias", "servicios", "webhook", "kubernetes",
+            "categorias", "servicios", "webhook", "kubernetes", "investigacion",
         },
         "perfil",
     )  # fmt: skip
@@ -237,6 +240,10 @@ def parsear(datos: Any) -> Perfil:
         servicios=frozenset(validar_servicio(str(s)) for s in servicios) if servicios else None,
         webhook=_webhook(_dict(datos.get("webhook"), "webhook")),
         kubernetes=_kubernetes(_dict(datos.get("kubernetes"), "kubernetes")),
+        investigacion={
+            str(n): _plantilla(q, str(n))
+            for n, q in _dict(datos.get("investigacion"), "investigacion").items()
+        },
     )
 
 

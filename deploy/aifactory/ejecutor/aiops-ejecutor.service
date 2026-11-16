@@ -1,0 +1,27 @@
+# Unidad systemd del ejecutor de acciones del agente AIOps (ADR-003).
+# Instalar: ver deploy/aifactory/ejecutor/README.md
+[Unit]
+Description=Ejecutor de acciones del agente AIOps (docker restart validado)
+After=docker.service
+Requires=docker.service
+
+[Service]
+User=aiops-exec
+Group=docker
+Environment=AIOPS_SOLICITUDES_DIR=/var/lib/aiops/solicitudes
+Environment=AIOPS_EJECUTOR_PERMITIDOS=/etc/aiops/servicios-permitidos
+Environment=AIOPS_EJECUTOR_PREFIJO=ia-factory-
+Environment=AIOPS_EJECUTOR_MAX_POR_HORA=3
+ExecStart=/usr/bin/python3 /opt/ai-factory/aiops-agent/deploy/aifactory/ejecutor/aiops_ejecutor.py
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+ProtectSystem=strict
+# El socket de Docker tiene que ser escribible para conectarse; el resto queda de solo lectura.
+ReadWritePaths=/var/lib/aiops/solicitudes /run/docker.sock
+Environment=DOCKER_CONFIG=/tmp/docker
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

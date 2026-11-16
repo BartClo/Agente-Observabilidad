@@ -72,11 +72,48 @@ def test_lo_que_no_se_arregla_reiniciando_queda_fuera_del_catalogo(alerta: str) 
     assert categoria_para_alerta(alerta) is None
 
 
-def test_el_servicio_compose_arranca_sin_acciones_y_en_nivel_1() -> None:
+def test_el_servicio_compose_arranca_sin_acciones_y_en_nivel_1_por_defecto() -> None:
+    """Actuar es opt-in desde aiops.env: sin tocarlo, el agente solo observa."""
     entorno = _compose()["x-aiops"]["environment"]
-    assert entorno["AIOPS_ACTIONS"] == "ninguna"
-    assert entorno["AIOPS_AUTONOMY_LEVEL"] == "1"
-    assert entorno["AIOPS_ALLOWED_ENVS"] == "dev"
+    assert entorno["AIOPS_ACTIONS"] == "${AIOPS_ACTIONS:-ninguna}"
+    assert entorno["AIOPS_AUTONOMY_LEVEL"] == "${AIOPS_AUTONOMY_LEVEL:-1}"
+    assert entorno["AIOPS_ALLOWED_ENVS"] == "${AIOPS_ALLOWED_ENVS:-dev}"
+
+
+def test_las_acciones_van_por_solicitud_al_host_sin_socket() -> None:
+    aiops = _compose()["x-aiops"]
+    assert aiops["environment"]["AIOPS_SOLICITUDES_DIR"] == "/solicitudes"
+    assert any(str(v).endswith(":/solicitudes") for v in aiops["volumes"])
+    ejecutor = RAIZ / "deploy" / "aifactory" / "ejecutor"
+    unidad = (ejecutor / "aiops-ejecutor.service").read_text(encoding="utf-8")
+    assert "User=aiops-exec" in unidad and "NoNewPrivileges=true" in unidad
+    permitidos = (ejecutor / "servicios-permitidos.example").read_text(encoding="utf-8")
+    activos = {s.strip() for s in permitidos.splitlines() if s.strip() and not s.startswith("#")}
+    assert not activos & {"postgres", "redis", "prometheus", "alertmanager", "aiops-agent"}
+
+
+def test_el_perfil_trae_consultas_de_investigacion_del_contenedor() -> None:
+    from infra.observabilidad import InvestigacionPrometheus
+
+    perfil = _perfil_aprobado()
+    assert set(perfil.investigacion) == {"contenedor_estado", "contenedor_salud", "responde"}
+
+    class _Obs:
+        def series(self, plantilla: str, servicio: str) -> list[tuple[dict[str, str], str]]:
+            if "state" in plantilla:
+                return [({"__name__": "x", "service_name": servicio, "state": "exited"}, "0")]
+            return []
+
+    lineas = InvestigacionPrometheus(_Obs(), perfil.investigacion).eventos("qa-agent", 10)  # type: ignore[arg-type]
+    assert "contenedor_estado{service_name=qa-agent,state=exited} = 0" in lineas
+    assert "responde: sin datos" in lineas
+
+
+def test_el_prompt_investiga_antes_de_escalar_aunque_no_sea_elegible() -> None:
+    prompt = (RAIZ / "agents" / "aiops" / "prompt.md").read_text(encoding="utf-8")
+    paso4 = prompt[prompt.index("4. `clasificar_incidente`") : prompt.index("5. ")]
+    assert "registrar_diagnostico" in paso4 and "DESPUES `escalar_a_humano`" in paso4
+    assert "Sos " not in prompt  # espanol neutro
 
 
 def test_ningun_servicio_monta_el_socket_ni_corre_privilegiado() -> None:
@@ -162,6 +199,8 @@ def test_los_montajes_y_el_build_apuntan_a_rutas_que_existen() -> None:
     assert (base / build["context"] / build["dockerfile"]).is_file()
     for volumen in _compose()["x-aiops"]["volumes"]:
         origen = volumen.split(":")[0]
+        if origen.startswith("${"):
+            continue  # directorio del host (solicitudes), no del repositorio
         assert (base / origen / PERFIL.name).is_file(), volumen
 
 

@@ -19,6 +19,12 @@ consultas:
   servicio_responde: 'min(up{job="$servicio"} or probe_success{service="$servicio"})'
   # docker-healthcheck-exporter: 1 sano, 0 unhealthy, -1 sin healthcheck.
   contenedor_sano: 'min(iafactory_infra_container_health_status{service_name="$servicio"})'
+# Lo que el agente ve con consultar_eventos en Compose (no hay eventos de Kubernetes): el
+# estado del contenedor segun el exportador de la plataforma. Solo lectura.
+investigacion:
+  contenedor_estado: 'iafactory_infra_container_state{service_name="$servicio"}'
+  contenedor_salud: 'iafactory_infra_container_health_status{service_name="$servicio"}'
+  responde: 'up{job="$servicio"} or probe_success{service="$servicio"}'
 categorias:
   - id: servicio_caido
     nombre: Servicio sin respuesta

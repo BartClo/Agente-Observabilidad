@@ -1,0 +1,6 @@
+# Servicios que el agente puede pedir reiniciar (nombre del servicio Compose, sin el
+# prefijo ia-factory-). Uno por linea. Copiar a /etc/aiops/servicios-permitidos.
+# NUNCA infraestructura: postgres, redis, prometheus, alertmanager, loki, grafana,
+# ni el propio agente (aiops-agent, aiops-worker, aiops-db, aiops-redis).
+qa-agent
+frontend

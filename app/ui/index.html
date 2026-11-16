@@ -228,14 +228,14 @@
           <table>
             <thead><tr><th>Incidente</th><th>Alerta</th><th>Servicio</th><th>Estado</th>
               <th>Autónomo</th><th>Decisión humana</th></tr></thead>
-            <tbody id="filas"><tr><td colspan="6" class="vacio">Conectá con tu usuario y token (arriba a la derecha) para ver los incidentes.</td></tr></tbody>
+            <tbody id="filas"><tr><td colspan="6" class="vacio">Conéctate con tu usuario y token (arriba a la derecha) para ver los incidentes.</td></tr></tbody>
           </table>
         </div>
       </section>
 
       <section class="panel" id="detalle" aria-labelledby="detalle-titulo">
         <h2 id="detalle-titulo" style="margin-bottom:10px">Línea de tiempo</h2>
-        <p id="detalle-vacio" class="vacio">Elegí un incidente para ver qué hizo el agente, paso a paso.</p>
+        <p id="detalle-vacio" class="vacio">Elige un incidente para ver qué hizo el agente, paso a paso.</p>
         <div id="detalle-resumen" class="mono" hidden></div>
         <ol class="linea" id="linea"></ol>
       </section>
@@ -251,7 +251,7 @@
       <button class="primario" id="chat-enviar">Enviar</button>
     </form>
     <p class="sub">Responde sobre incidentes, historial, métricas y runbooks. No ejecuta ni aprueba nada:
-      eso lo hace el agente solo o vos desde Operación. Los avisos 🔔 son lo que hizo el agente.</p>
+      eso lo hace el agente solo o tú desde Operación. Los avisos 🔔 son lo que hizo el agente.</p>
   </section>
 
   <div class="vista" data-panel="config" hidden>
@@ -266,7 +266,7 @@
     <section class="panel" id="sec-llm" aria-labelledby="llm-titulo">
       <div class="cabeza"><h2 id="llm-titulo">Modelo del agente</h2><span class="espacio"></span>
         <span id="llm-activo" class="chip"></span></div>
-      <p class="sub" style="margin:0" id="llm-pista">Elegí proveedor, pegá la key y pulsá «Guardar y probar»: se prueba con una llamada real y solo queda en uso si responde.</p>
+      <p class="sub" style="margin:0" id="llm-pista">Elige proveedor, pega la key y pulsa «Guardar y probar»: se prueba con una llamada real y solo queda en uso si responde.</p>
       <div id="llm-cuerpo" hidden>
         <div class="provs" id="llm-provs" role="group" aria-label="Proveedor"></div>
         <input type="hidden" id="llm-prov">
@@ -317,7 +317,7 @@
           <div class="campos">
             <label>Sitio <input id="jira-sitio" placeholder="https://empresa.atlassian.net" spellcheck="false"></label>
             <label>Correo de la cuenta <input id="jira-correo" spellcheck="false" placeholder="ops@empresa.com"></label>
-            <label>API token <input id="jira-token" type="password" autocomplete="off" placeholder="pegá el token"></label>
+            <label>API token <input id="jira-token" type="password" autocomplete="off" placeholder="pega el token"></label>
           </div>
           <div class="barra" style="margin-top:10px"><button id="jira-guardar" class="primario">Conectar</button>
             <a class="sub" href="https://id.atlassian.com/manage-profile/security/api-tokens" target="_blank" rel="noopener">¿Cómo creo un token?</a></div>
@@ -545,7 +545,7 @@ function elegirProveedor(id) {
   for (const b of $("llm-provs").children) b.setAttribute("aria-pressed", String(b.dataset.id === id));
   $("llm-modelo").placeholder = p.ejemplo;
   $("llm-key").value = "";
-  $("llm-key").placeholder = p.configurada ? `guardada ••••${p.sufijo} · vacío = conservar` : "pegá la API key";
+  $("llm-key").placeholder = p.configurada ? `guardada ••••${p.sufijo} · vacío = conservar` : "pega la API key";
   $("llm-borrar").hidden = !p.configurada;
   cargarModelos();
 }
@@ -568,7 +568,7 @@ async function cargarModelos() {
     sel.value = modelos.includes(preferido) ? preferido : (modelos[0] || OTRO);
     elegirModelo();
   };
-  if (!key && !p.configurada) { llenar([], "Pegá la API key para ver los modelos"); return; }
+  if (!key && !p.configurada) { llenar([], "Pega la API key para ver los modelos"); return; }
   llenar([], "Cargando modelos…");
   try {
     const modelos = await admin("/config/llm/modelos", { method: "POST", body: JSON.stringify({ proveedor: id, api_key: key || null }) });
@@ -646,7 +646,7 @@ async function cargarChat() {
     estadoChat = await api("/notificaciones");
     $("gchat-estado").textContent = estadoChat.configurado
       ? `Webhook configurado en el servidor · enviados ${estadoChat.enviados ?? 0} · pendientes ${estadoChat.pendientes ?? 0} · fallidos ${estadoChat.fallidos ?? 0}`
-      : "Sin webhook: definí AIOPS_GCHAT_WEBHOOK_URL en aiops.env y reiniciá el agente.";
+      : "Sin webhook: define AIOPS_GCHAT_WEBHOOK_URL en aiops.env y reinicia el agente.";
     $("gchat-probar").disabled = !estadoChat.configurado;
   } catch (e) { $("gchat-estado").textContent = "Error: " + e.message; }
   pintarSetup();
@@ -687,7 +687,7 @@ $("resp-quitar").addEventListener("click", () => accionLLM("/config/llm/respaldo
 // responde la deja en uso.
 $("llm-probar").addEventListener("click", async () => {
   const proveedor = $("llm-prov").value, modelo = $("llm-modelo").value.trim(), key = $("llm-key").value.trim();
-  if (!modelo) { resultado("llm-resultado", false, "Indicá el modelo."); return; }
+  if (!modelo) { resultado("llm-resultado", false, "Indica el modelo."); return; }
   resultado("llm-resultado", null, "Probando…");
   try {
     if (key) await admin(`/config/llm/credenciales/${proveedor}`, { method: "PUT", body: JSON.stringify({ api_key: key, usuario: usuarioActual() }) });
@@ -706,7 +706,7 @@ function pintarJira(cfg) {
   if (cfg.sitio) $("jira-sitio").value = cfg.sitio;
   if (cfg.correo) $("jira-correo").value = cfg.correo;
   $("jira-token").value = "";
-  $("jira-token").placeholder = cfg.configurada ? `guardado ••••${cfg.sufijo} · vacío = conservar` : "pegá el token";
+  $("jira-token").placeholder = cfg.configurada ? `guardado ••••${cfg.sufijo} · vacío = conservar` : "pega el token";
   $("jira-guardar").textContent = cfg.configurada ? "Guardar y probar" : "Conectar";
   const estado = cfg.ultimo_error ? "Error" : cfg.activo ? "Escuchando" : cfg.configurada ? "En pausa" : "sin conectar";
   $("jira-estado").textContent = estado;
@@ -773,7 +773,7 @@ $("jira-activar").addEventListener("click", async () => {
       resultado("jira-resultado-2", null, "");
       return;
     }
-    if (!$("jira-tablero").value || !$("jira-entrada").value) { resultado("jira-resultado-2", false, "Elegí tablero y columna."); return; }
+    if (!$("jira-tablero").value || !$("jira-entrada").value) { resultado("jira-resultado-2", false, "Elige tablero y columna."); return; }
     await admin("/config/jira/tablero", { method: "PUT", body: JSON.stringify({
       tablero_id: Number($("jira-tablero").value), entrada: $("jira-entrada").value,
       resuelto: $("jira-resuelto").value || null, escalado: $("jira-escalado").value || null,

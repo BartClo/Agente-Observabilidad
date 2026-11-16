@@ -58,6 +58,11 @@ def armar(*, persistencia: str | None = None) -> Ciclo:
             from infra.acciones_k8s import BackendKubernetes
 
             backend = BackendKubernetes.desde_entorno()
+        elif acciones == "compose":
+            # Docker Compose sin docker.sock: solicitud que valida y ejecuta el host.
+            from infra.acciones_compose import BackendSolicitudes
+
+            backend = BackendSolicitudes.desde_entorno()
         elif acciones == "ninguna":
             # Sin backend de acciones: el agente observa, recomienda y escala.
             backend = BackendDeshabilitado()
@@ -67,7 +72,15 @@ def armar(*, persistencia: str | None = None) -> Ciclo:
         raise ValueError(f"AIOPS_BACKEND desconocido: {backend_nombre!r}")
 
     # El backend que sabe leer eventos (simulado, Kubernetes) tambien sirve de investigacion.
-    investigacion = backend if isinstance(backend, InvestigacionPort) else None
+    investigacion: InvestigacionPort | None = (
+        backend if isinstance(backend, InvestigacionPort) else None
+    )
+    if investigacion is None and perfil is not None and perfil.investigacion:
+        # Sin eventos del orquestador (Compose): el estado del contenedor via Prometheus.
+        from infra.observabilidad import InvestigacionPrometheus, PrometheusLoki
+
+        if isinstance(observabilidad, PrometheusLoki):
+            investigacion = InvestigacionPrometheus(observabilidad, perfil.investigacion)
     politica = politica_desde_entorno()
     if perfil is not None:
         # El entorno solo acota: AIOPS_ALLOWED_ENVS y AIOPS_AUTONOMY_LEVEL siguen siendo el

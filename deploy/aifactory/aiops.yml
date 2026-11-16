@@ -1,6 +1,6 @@
 # Agente AIOps como servicio de AI FACTORY. Se agrega al `include:` de docker-compose.yml de
-# ai-factory-platform. Sin docker.sock (ADR-003): en nivel 1 el agente no ejecuta acciones;
-# reiniciar o recrear vendra por una solicitud que valida una unidad systemd del host.
+# ai-factory-platform. Sin docker.sock (ADR-003): para actuar, el agente deja una solicitud
+# en AIOPS_SOLICITUDES_HOST y la ejecuta el host (deploy/aifactory/ejecutor/README.md).
 # Los valores salen de aiops.env (ver aiops.env.example); nunca se commitea con secretos.
 x-aiops: &aiops
   # Rutas relativas a este archivo: el contexto es la raiz del repositorio.
@@ -11,9 +11,13 @@ x-aiops: &aiops
   env_file: [aiops.env]
   environment:
     AIOPS_BACKEND: prometheus
-    AIOPS_ACTIONS: ninguna          # nivel 1: observa, diagnostica y avisa
-    AIOPS_AUTONOMY_LEVEL: "1"       # tope global; el perfil no puede superarlo
-    AIOPS_ALLOWED_ENVS: dev
+    # Por defecto nivel 1 (observa, diagnostica y avisa). Para actuar: AIOPS_ACTIONS=compose,
+    # AIOPS_AUTONOMY_LEVEL=3 en aiops.env, el nivel de cada categoria en el perfil y el
+    # ejecutor del host instalado.
+    AIOPS_ACTIONS: ${AIOPS_ACTIONS:-ninguna}
+    AIOPS_AUTONOMY_LEVEL: ${AIOPS_AUTONOMY_LEVEL:-1}   # tope global; el perfil no lo supera
+    AIOPS_ALLOWED_ENVS: ${AIOPS_ALLOWED_ENVS:-dev}
+    AIOPS_SOLICITUDES_DIR: /solicitudes
     AIOPS_PERFIL: ${AIOPS_PERFIL:-/perfiles/aifactory-dev.yaml}
     AIOPS_PERSISTENCIA: postgres
     AIOPS_PROMETHEUS_URL: http://prometheus:9090
@@ -23,6 +27,7 @@ x-aiops: &aiops
     DATABASE_URL: postgresql://aiops:${AIOPS_DB_PASSWORD:?falta AIOPS_DB_PASSWORD}@ia-factory-aiops-db:5432/aiops
   volumes:
     - ../../perfiles:/perfiles:ro
+    - ${AIOPS_SOLICITUDES_HOST:-/var/lib/aiops/solicitudes}:/solicitudes
   networks: [ia-factory-network]
   restart: unless-stopped
 

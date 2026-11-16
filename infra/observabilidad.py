@@ -150,6 +150,15 @@ class PrometheusLoki:
             return None  # sin datos = sin evidencia
         return float(resultado[0]["value"][1])
 
+    def series(self, plantilla: str, servicio: str) -> list[tuple[dict[str, str], str]]:
+        """Todas las series de una consulta del perfil: (etiquetas, valor)."""
+        query = plantilla.format(s=validar_servicio(servicio), l=self._etiqueta, m=self._mountpoint)
+        url = f"{self._prom}/api/v1/query?" + urllib.parse.urlencode({"query": query})
+        return [
+            (r.get("metric", {}), r["value"][1])
+            for r in self._get(url).get("data", {}).get("result", [])
+        ]
+
     def logs(self, servicio: str, lineas: int, desde: float | None = None) -> list[str]:
         if self._loki is None:
             return []
@@ -167,3 +176,24 @@ class PrometheusLoki:
             for stream in datos.get("data", {}).get("result", [])
             for _, linea in stream.get("values", [])
         ][:lineas]
+
+
+class InvestigacionPrometheus:
+    """`InvestigacionPort` con las consultas `investigacion:` del perfil: el estado del
+    contenedor visto por Prometheus (exportador de la plataforma), sin acceso a Docker."""
+
+    def __init__(self, obs: PrometheusLoki, consultas: Mapping[str, str]) -> None:
+        self._obs, self._consultas = obs, dict(consultas)
+
+    def eventos(self, servicio: str, maximo: int) -> list[str]:
+        lineas: list[str] = []
+        for nombre, plantilla in self._consultas.items():
+            series = self._obs.series(plantilla, servicio)
+            if not series:
+                lineas.append(f"{nombre}: sin datos")
+            for etiquetas, valor in series:
+                extra = ",".join(
+                    f"{k}={v}" for k, v in sorted(etiquetas.items()) if k != "__name__"
+                )
+                lineas.append(f"{nombre}{{{extra}}} = {valor}")
+        return lineas[:maximo]
