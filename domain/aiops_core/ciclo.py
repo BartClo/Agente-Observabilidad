@@ -199,8 +199,9 @@ class Ciclo:
         """Una caida dispara varias reglas a la vez (ServiceDown, ContainerUnhealthy, sonda
         sintetica...). Si OTRA alerta del mismo servicio ya tiene un incidente en curso, o uno
         escalado hace menos de `ventana_s`, esta se anota ahi y no abre otro: un solo
-        diagnostico, un solo reinicio, un solo aviso. Un resuelto o descartado no agrupa: si
-        vuelve a fallar es una recurrencia real. La misma alerta (reintento del job) no agrupa."""
+        diagnostico, un solo reinicio, un solo aviso. Un resuelto agrupa solo las alertas de
+        la misma caida (disparadas antes del cierre); un descartado no agrupa.
+        La misma alerta (reintento del job) no agrupa."""
         if ventana_s <= 0:
             return None
         ahora = self._reloj()
@@ -210,7 +211,16 @@ class Ciclo:
                 continue
             en_curso = inc.estado not in self._ESTADOS_TERMINALES
             escalado_reciente = inc.estado is Estado.ESCALADO and ahora - inc.abierto_en < ventana_s
-            if en_curso or escalado_reciente:
+            # Resuelto: agrupa solo si esta alerta empezo ANTES del cierre (es la misma caida,
+            # que llego tarde). Si empezo despues, el servicio volvio a caer: incidente nuevo.
+            misma_caida = (
+                inc.estado is Estado.RESUELTO
+                and inc.cerrado_en is not None
+                and ahora - inc.cerrado_en < ventana_s
+                and alerta.disparada_en is not None
+                and alerta.disparada_en <= inc.cerrado_en
+            )
+            if en_curso or escalado_reciente or misma_caida:
                 self.auditoria.registrar(inc.id, "alerta_agrupada", alerta=alerta.nombre)
                 return inc
         return None

@@ -1065,9 +1065,18 @@ def test_alertas_del_mismo_servicio_se_agrupan_en_un_incidente() -> None:
     ciclo.escalar(inc.id, "x")
     assert ciclo.agrupar(otra, 900) is not None
     inc2 = ciclo.incidente(inc.id)
-    inc2.estado = Estado.RESUELTO
+    inc2.estado, inc2.cerrado_en = Estado.RESUELTO, 1000.0
     ciclo._guardar(inc2)
-    assert ciclo.agrupar(otra, 900) is None
+    ciclo._reloj = lambda: 1100.0
+    # Misma caida que llego tarde (disparada antes del cierre): se agrupa, sin gastar LLM.
+    assert ciclo.agrupar(dataclasses.replace(otra, disparada_en=990.0), 900) is not None
+    # Volvio a caer despues del cierre, o sin hora de disparo: incidente nuevo.
+    assert ciclo.agrupar(dataclasses.replace(otra, disparada_en=1050.0), 900) is None
+    assert ciclo.agrupar(dataclasses.replace(otra, disparada_en=None), 900) is None
+    ciclo._reloj = lambda: 3000.0
+    assert (
+        ciclo.agrupar(dataclasses.replace(otra, disparada_en=990.0), 900) is None
+    )  # fuera de ventana
 
 
 def _diagnosticar(ciclo: Ciclo, alerta_id: str, **kw: object) -> str:
