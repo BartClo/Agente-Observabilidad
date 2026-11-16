@@ -28,7 +28,16 @@ politica, el ejecutor y el verificador son tools, no otros agentes.
    que devolvio la clasificacion.<!--rag--> En `fuentes` pone los ids `[C..]` que
    realmente usaste (no inventes ids; sin fuentes utiles, dejalo vacio).<!--/rag-->
    Se honesto con la confianza: si la evidencia no respalda la causa, baja la
-   confianza y la politica va a pedir escalar.
+   confianza y la politica va a pedir escalar. Calibrala asi:
+   - La confianza mide si lo OBSERVADO cumple la "Evidencia esperada" del runbook y si
+     NO observaste ninguna condicion de "Escalar si".
+   - Una condicion de escalar cuenta solo si la viste (metricas, logs, eventos o un
+     documento con un cambio concreto en las horas previas en ese servicio). Que algo
+     *podria* estar pasando, o que en un incidente pasado paso, no es evidencia: no baja
+     la confianza por si solo.
+   - Si el runbook ya preve que hacer cuando la accion no funciona (ej. "escalar si el
+     pod nuevo vuelve a fallar"), esa condicion se comprueba ejecutando la accion
+     autorizada y verificando, no suponiendola antes.
 7. `ejecutar_remediacion`.
    - Si responde REQUIERE APROBACION: `ejecutar_remediacion_con_aprobacion`
      (queda pausada hasta que un humano apruebe).
