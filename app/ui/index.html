@@ -143,6 +143,32 @@
   #ingreso input, #ingreso button { height: 44px; }
   #ingreso-error { color: var(--bad); min-height: 1.5em; margin: 0; }
   /* Configuracion: puesta en marcha y tarjetas de proveedor */
+  .drop { position: relative; display: flex; align-items: center; gap: 14px; padding: 16px; margin-top: 12px;
+    cursor: pointer; border: 1.5px dashed var(--line); border-radius: var(--radio); background: var(--panel-2); }
+  .drop:hover, .drop.encima { border-color: var(--accent); background: var(--accent-soft); }
+  .drop input[type=file] { position: absolute; width: 1px; height: 1px; opacity: 0; }
+  .drop:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .drop .icono { font-size: 24px; }
+  .drop b { display: block; } .drop small { color: var(--muted); }
+  .drop .espacio { flex: 1; }
+  .docs-cabeza { display: flex; align-items: center; gap: 8px; margin-top: 16px; }
+  .docs-cabeza input { max-width: 220px; margin-left: auto; }
+  .docs { list-style: none; margin: 8px 0 0; padding: 0; max-height: 340px; overflow: auto;
+    border: 1px solid var(--line); border-radius: var(--radio); }
+  .docs li { display: flex; align-items: center; gap: 12px; padding: 9px 12px; border-top: 1px solid var(--line); }
+  .docs li:first-child { border-top: 0; }
+  .docs li:hover { background: var(--panel-2); }
+  .docs .ext { flex: none; width: 38px; text-align: center; font-size: 11px; font-weight: 700; padding: 4px 0;
+    border-radius: 5px; background: var(--accent-soft); color: var(--accent); }
+  .docs .ext.pdf { background: var(--bad-soft); color: var(--bad); }
+  .docs .info { flex: 1; min-width: 0; }
+  .docs .nombre { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+  .docs .meta { font-size: 12px; color: var(--muted); }
+  .docs .obs { color: var(--warn); }
+  .docs button { padding: 4px 10px; font-size: 13px; border-color: transparent; background: transparent; color: var(--muted); }
+  .docs button:hover { color: var(--bad); border-color: var(--bad); }
+  .docs button.confirmar { color: #fff; background: var(--bad); border-color: var(--bad); }
+  .docs li.vacio { justify-content: center; color: var(--muted); padding: 18px; }
   .setup { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; padding: 0; list-style: none; }
   .config-grid { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start; }
   .config-lado { flex: 1 1 240px; max-width: 300px; position: sticky; top: 72px; }
@@ -310,11 +336,18 @@
       <div class="cabeza"><h2 id="rag-titulo">Conocimiento (opcional)</h2><span class="espacio"></span>
         <span id="rag-cuenta" class="chip"></span></div>
       <p class="sub" style="margin:0">Fichas de servicio, arquitectura, postmortems o procedimientos (.md o .pdf, hasta 10 MB). El agente los consulta para informar su diagnóstico; nunca deciden la acción. Se indexan con la key de Google guardada en «Modelo del agente».</p>
-      <div class="barra" style="margin-top:12px">
-        <input type="file" id="rag-archivo" accept=".md,.pdf" multiple aria-label="Documentos">
-        <button id="rag-subir" class="primario">Subir e indexar</button></div>
+      <label class="drop" id="rag-drop">
+        <span class="icono" aria-hidden="true">📄</span>
+        <span><b id="rag-sel">Arrastra archivos aquí o haz clic para elegir</b>
+          <small>.md o .pdf · hasta 10 MB cada uno</small></span>
+        <span class="espacio"></span>
+        <input type="file" id="rag-archivo" accept=".md,.pdf" multiple>
+        <button id="rag-subir" class="primario" type="button" disabled>Subir e indexar</button>
+      </label>
       <p class="resultado" id="rag-resultado" role="status"></p>
-      <ul id="rag-lista" class="sub" style="margin:8px 0 0;padding-left:18px"></ul>
+      <div class="docs-cabeza" id="rag-cabeza" hidden><strong>Documentos indexados</strong>
+        <input id="rag-filtro" type="search" placeholder="Filtrar…" aria-label="Filtrar documentos"></div>
+      <ul id="rag-lista" class="docs" hidden></ul>
     </section>
 
     <section class="panel" id="sec-jira" aria-labelledby="jira-titulo">
@@ -687,20 +720,63 @@ async function accionLLM(ruta, opciones) {
 async function cargarRAG() {
   try {
     docsRAG = await admin("/conocimiento");
-    const ul = $("rag-lista"); ul.replaceChildren();
-    docsRAG.forEach((d) => {
-      const li = el("li", `${d.nombre} · ${d.tipo} · ${d.paginas} pág. ${d.obsoleto ? "· obsoleto " : ""}`);
-      const b = el("button", "Borrar", "peligro"); b.style.marginLeft = "8px";
-      b.addEventListener("click", async () => {
-        try { await admin(`/conocimiento/${d.id}`, { method: "DELETE" }); cargarRAG(); }
-        catch (e) { resultado("rag-resultado", false, "Error: " + e.message); }
-      });
-      li.append(b); ul.append(li);
-    });
+    pintarDocs();
     $("rag-cuenta").textContent = docsRAG.length ? `${docsRAG.length} documentos` : "sin documentos";
   } catch (e) { $("rag-cuenta").textContent = "no disponible"; }
   pintarSetup();
 }
+const TIPOS = { ficha: "Ficha de servicio", arquitectura: "Arquitectura", postmortem: "Postmortem",
+  guia: "Guía", runbook: "Runbook", procedimiento: "Procedimiento", otro: "Otro" };
+const tamano = (b) => !b ? "" : b < 1024 ? `${b} B` : b < 1048576 ? `${Math.round(b / 1024)} KB` : `${(b / 1048576).toFixed(1)} MB`;
+function pintarDocs() {
+  const ul = $("rag-lista"); ul.replaceChildren();
+  const docs = docsRAG || [];
+  $("rag-cabeza").hidden = $("rag-lista").hidden = docs.length === 0;
+  const f = $("rag-filtro").value.trim().toLowerCase();
+  const vistos = docs.filter((d) => !f || `${d.nombre} ${d.tipo} ${d.servicios}`.toLowerCase().includes(f));
+  if (!vistos.length) { ul.append(el("li", "Ningún documento coincide.", "vacio")); return; }
+  for (const d of vistos) {
+    const li = el("li");
+    const pdf = /\.pdf$/i.test(d.nombre);
+    const info = el("div", null, "info");
+    info.append(el("span", d.nombre, "nombre"));
+    const meta = [TIPOS[d.tipo] || d.tipo];
+    const servicios = Array.isArray(d.servicios) ? d.servicios.join(", ") : d.servicios;
+    if (servicios) meta.push(servicios);
+    if (d.paginas) meta.push(`${d.paginas} pág.`);
+    if (d.bytes) meta.push(tamano(d.bytes));
+    const m = el("span", meta.join(" · "), "meta");
+    if (d.obsoleto) m.append(el("span", " · obsoleto", "obs"));
+    info.append(m);
+    const b = el("button", "Borrar"); b.type = "button"; b.title = `Borrar ${d.nombre}`;
+    let armado = null;
+    b.addEventListener("click", async () => {
+      if (!armado) {  // dos clics: el primero arma, el segundo borra
+        b.textContent = "¿Borrar?"; b.classList.add("confirmar");
+        armado = setTimeout(() => { b.textContent = "Borrar"; b.classList.remove("confirmar"); armado = null; }, 3000);
+        return;
+      }
+      clearTimeout(armado); b.disabled = true;
+      try { await admin(`/conocimiento/${d.id}`, { method: "DELETE" }); resultado("rag-resultado", true, `Borrado: ${d.nombre}`); cargarRAG(); }
+      catch (e) { b.disabled = false; resultado("rag-resultado", false, "Error: " + e.message); }
+    });
+    li.append(el("span", pdf ? "PDF" : "MD", pdf ? "ext pdf" : "ext"), info, b);
+    ul.append(li);
+  }
+}
+$("rag-filtro").addEventListener("input", pintarDocs);
+function elegidos() {
+  const fs = $("rag-archivo").files, n = fs.length;
+  $("rag-sel").textContent = n ? (n === 1 ? fs[0].name : `${n} archivos elegidos`) : "Arrastra archivos aquí o haz clic para elegir";
+  $("rag-subir").disabled = !n;
+}
+$("rag-archivo").addEventListener("change", elegidos);
+const zona = $("rag-drop");
+["dragenter", "dragover"].forEach((ev) => zona.addEventListener(ev, (e) => { e.preventDefault(); zona.classList.add("encima"); }));
+["dragleave", "drop"].forEach((ev) => zona.addEventListener(ev, () => zona.classList.remove("encima")));
+zona.addEventListener("drop", (e) => { e.preventDefault(); $("rag-archivo").files = e.dataTransfer.files; elegidos(); });
+// El boton vive dentro del <label>: sin esto, cada clic tambien abriria el selector.
+$("rag-subir").addEventListener("click", (e) => e.preventDefault());
 const aBase64 = (f) => new Promise((ok, mal) => {
   const r = new FileReader();
   r.onload = () => ok(String(r.result).split(",")[1] || "");
@@ -718,9 +794,9 @@ $("rag-subir").addEventListener("click", async () => {
       hechos.push(f.name);
     }
     resultado("rag-resultado", true, `Listo: ${hechos.join(", ")}`);
-    $("rag-archivo").value = "";
+    $("rag-archivo").value = ""; elegidos();
   } catch (e) { resultado("rag-resultado", false, `Error${hechos.length ? " (ya subidos: " + hechos.join(", ") + ")" : ""}: ${e.message}`); }
-  $("rag-subir").disabled = false;
+  elegidos();
   cargarRAG();
 });
 
