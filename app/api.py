@@ -15,15 +15,17 @@ de un `Ciclo` que corra con `AIOPS_PERSISTENCIA=postgres` (ver runtime.py): en m
 from __future__ import annotations
 
 import dataclasses
+import hashlib
 import hmac
 import logging
 import os
+import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated, Any
 
-from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse, PlainTextResponse
 
 from agents.aiops import runtime
@@ -83,14 +85,93 @@ def _verificar_token(variable: str, authorization: str | None) -> None:
         raise HTTPException(401, "token invalido o ausente")
 
 
-def requiere_token(authorization: Annotated[str | None, Header()] = None) -> None:
-    _verificar_token("AIOPS_API_TOKEN", authorization)
+# --- Sesion de la UI: el operador pega su token UNA vez y recibe una cookie firmada con
+# su rol. Clientes de maquina (Alertmanager, Grafana, scripts) siguen con Bearer.
+# Firma: HMAC con los tokens vigentes del rol, asi que rotar el token cierra las sesiones.
+# CSRF: la cookie solo vale si llega la cabecera X-AIOPS-UI, que un sitio ajeno no puede
+# mandar sin preflight CORS (y no hay CORS); SameSite=Strict de yapa.
+_COOKIE = "aiops_sesion"
+_CABECERA_UI = "x-aiops-ui"
+_DURACION_S = 8 * 3600
+_VARIABLE_ROL = {"admin": "AIOPS_ADMIN_TOKEN", "operador": "AIOPS_API_TOKEN"}
 
 
-def requiere_admin(authorization: Annotated[str | None, Header()] = None) -> None:
+def _tokens(variable: str) -> list[str]:
+    return [t.strip() for t in os.environ.get(variable, "").split(",") if t.strip()]
+
+
+def _firma(rol: str, usuario: str, vence: int) -> str:
+    clave = ",".join(_tokens(_VARIABLE_ROL[rol])).encode()
+    return hmac.new(clave, f"{rol}|{usuario}|{vence}".encode(), hashlib.sha256).hexdigest()
+
+
+def _sesion(request: Request) -> dict[str, str] | None:
+    if not request.headers.get(_CABECERA_UI):
+        return None
+    try:
+        rol, usuario, vence, firma = request.cookies.get(_COOKIE, "").split("|")
+        if rol not in _VARIABLE_ROL or int(vence) < time.time() or not _tokens(_VARIABLE_ROL[rol]):
+            return None
+    except ValueError:
+        return None
+    if not hmac.compare_digest(firma, _firma(rol, usuario, int(vence))):
+        return None
+    return {"rol": rol, "usuario": usuario}
+
+
+def requiere_token(request: Request, authorization: Annotated[str | None, Header()] = None) -> None:
+    if _sesion(request) is None:  # cualquier rol con sesion opera
+        _verificar_token("AIOPS_API_TOKEN", authorization)
+
+
+def requiere_admin(request: Request, authorization: Annotated[str | None, Header()] = None) -> None:
     """Token aparte para configurar el LLM (API keys): el de operador (que tambien
     tiene Grafana para el webhook) no alcanza para cambiar credenciales."""
-    _verificar_token("AIOPS_ADMIN_TOKEN", authorization)
+    s = _sesion(request)
+    if s is None or s["rol"] != "admin":
+        _verificar_token("AIOPS_ADMIN_TOKEN", authorization)
+
+
+@app.post("/sesion")
+def iniciar_sesion(body: dict[str, Any], request: Request, response: Response) -> dict[str, str]:
+    usuario = _usuario(body)
+    if "|" in usuario or len(usuario) > 120:
+        raise HTTPException(422, "usuario invalido")
+    token = str(body.get("token", "")).encode()
+    rol = next(
+        (
+            r
+            for r, var in _VARIABLE_ROL.items()
+            if any([hmac.compare_digest(token, t.encode()) for t in _tokens(var)])
+        ),
+        None,
+    )
+    if rol is None:
+        raise HTTPException(401, "token invalido")
+    vence = int(time.time()) + _DURACION_S
+    response.set_cookie(
+        _COOKIE,
+        f"{rol}|{usuario}|{vence}|{_firma(rol, usuario, vence)}",
+        max_age=_DURACION_S,
+        httponly=True,
+        samesite="strict",
+        secure=request.url.scheme == "https",
+    )
+    return {"rol": rol, "usuario": usuario}
+
+
+@app.get("/sesion")
+def ver_sesion(request: Request) -> dict[str, str]:
+    s = _sesion(request)
+    if s is None:
+        raise HTTPException(401, "sin sesion")
+    return s
+
+
+@app.delete("/sesion")
+def cerrar_sesion(response: Response) -> dict[str, str]:
+    response.delete_cookie(_COOKIE)
+    return {"estado": "cerrada"}
 
 
 _AUTENTICADO = [Depends(requiere_token)]
@@ -108,8 +189,8 @@ _UI = Path(__file__).parent / "ui" / "index.html"
 @app.get("/ui", response_class=HTMLResponse)
 def ui() -> HTMLResponse:
     """UI para operar incidentes (Fase 5), pensada para embeberse en Grafana. Sin token:
-    la pagina no trae datos; los pide a la API con el token que el operador ingresa
-    (sessionStorage), en cabecera Authorization -- no cookie, asi que no hay CSRF.
+    la pagina no trae datos; el operador ingresa su token una vez (POST /sesion) y recibe
+    una cookie HttpOnly firmada con su rol. CSRF: ver `_sesion` (cabecera X-AIOPS-UI).
     `frame-ancestors` limita quien la puede embeber (AIOPS_UI_FRAME_ANCESTORS)."""
     ancestros = os.environ.get("AIOPS_UI_FRAME_ANCESTORS", "'self' http://localhost:3001")
     csp = (

@@ -140,7 +140,7 @@ def test_ui_se_sirve_sin_token_con_csp_de_framing() -> None:
     assert "AIOps" in resp.text
     csp = resp.headers["content-security-policy"]
     assert "frame-ancestors" in csp and "http://localhost:3001" in csp
-    assert "Bearer" in resp.text and "textContent" in resp.text  # token por cabecera, sin innerHTML
+    assert "X-AIOPS-UI" in resp.text and "textContent" in resp.text  # sesion, sin innerHTML
     assert "innerHTML" not in resp.text
 
 
