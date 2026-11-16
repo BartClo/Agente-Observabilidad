@@ -207,3 +207,9 @@ def test_los_montajes_y_el_build_apuntan_a_rutas_que_existen() -> None:
 def test_el_archivo_de_secretos_no_entra_ni_a_git_ni_a_la_imagen() -> None:
     for ignorar in (".gitignore", ".dockerignore"):
         assert "deploy/aifactory/aiops.env" in (RAIZ / ignorar).read_text(encoding="utf-8")
+
+
+def test_la_verificacion_espera_a_que_prometheus_vea_el_servicio() -> None:
+    entorno = _compose()["x-aiops"]["environment"]
+    assert entorno["AIOPS_VERIFY_WINDOW_S"] == "${AIOPS_VERIFY_WINDOW_S:-90}"
+    assert entorno["AIOPS_VERIFY_INTERVAL_S"] == "${AIOPS_VERIFY_INTERVAL_S:-10}"

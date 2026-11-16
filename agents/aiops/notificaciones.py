@@ -21,12 +21,17 @@ from infra.gchat import limpiar
 
 logger = logging.getLogger(__name__)
 
-HITOS = {"abierto", "accion", "escalado", "cerrado", "reconciliado"}
+# "abierto" no avisa: un falso positivo descartado no debe sonar, y lo que importa (que
+# actuo, que cerro, que escalo o que pide aprobacion) llega igual en el mismo hilo.
+# AIOPS_AVISAR_APERTURA=1 lo vuelve a activar.
+HITOS = {"accion", "escalado", "cerrado", "reconciliado"}
 
 
 def es_hito(evento: Evento) -> bool:
     if evento.tipo == "decision_politica":
         return evento.datos.get("veredicto") == "aprobacion"  # pide a un humano
+    if evento.tipo == "abierto":
+        return os.environ.get("AIOPS_AVISAR_APERTURA") == "1"
     return evento.tipo in HITOS
 
 

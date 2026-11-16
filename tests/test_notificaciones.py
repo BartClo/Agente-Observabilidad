@@ -184,10 +184,12 @@ def test_agotados_los_reintentos_pasa_a_fallida(chat: FalsoChat) -> None:
 # --- mensajes ------------------------------------------------------------------------
 
 
-def test_solo_los_hitos_avisan() -> None:
+def test_solo_los_hitos_avisan(monkeypatch: pytest.MonkeyPatch) -> None:
     def ev(tipo: str, **datos: object) -> Evento:
         return Evento(1.0, "INC-1", tipo, datos)
 
+    assert not avisos.es_hito(ev("abierto"))  # un descartado no hace ruido
+    monkeypatch.setenv("AIOPS_AVISAR_APERTURA", "1")
     for tipo in ("abierto", "accion", "escalado", "cerrado", "reconciliado"):
         assert avisos.es_hito(ev(tipo))
     assert avisos.es_hito(ev("decision_politica", veredicto="aprobacion"))

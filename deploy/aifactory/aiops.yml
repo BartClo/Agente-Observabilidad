@@ -18,6 +18,10 @@ x-aiops: &aiops
     AIOPS_AUTONOMY_LEVEL: ${AIOPS_AUTONOMY_LEVEL:-1}   # tope global; el perfil no lo supera
     AIOPS_ALLOWED_ENVS: ${AIOPS_ALLOWED_ENVS:-dev}
     AIOPS_SOLICITUDES_DIR: /solicitudes
+    # Verificar hasta 90 s (lectura cada 10 s): el contenedor tarda en arrancar y Prometheus
+    # scrapea cada 15 s. Con una sola lectura, un reinicio exitoso se leia como fallido.
+    AIOPS_VERIFY_WINDOW_S: ${AIOPS_VERIFY_WINDOW_S:-90}
+    AIOPS_VERIFY_INTERVAL_S: ${AIOPS_VERIFY_INTERVAL_S:-10}
     AIOPS_PERFIL: ${AIOPS_PERFIL:-/perfiles/aifactory-dev.yaml}
     AIOPS_PERSISTENCIA: postgres
     AIOPS_PROMETHEUS_URL: http://prometheus:9090
