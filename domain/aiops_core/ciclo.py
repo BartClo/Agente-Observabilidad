@@ -184,7 +184,9 @@ class Ciclo:
             and i.resuelto_autonomo
             and ahora - i.abierto_en < 3600
         ]
-        if len(previas) >= 2:
+        # Mismo interruptor que el cortacircuito (AIOPS_BREAKER_MAX=0): los dos frenan la
+        # recurrencia real, y el experimento los apaga porque inyecta fallas en serie.
+        if self.politica.max_acciones_servicio > 0 and len(previas) >= 2:
             condiciones.append(f"recurrente: {len(previas)} remediaciones en la ultima hora")
         if self._investigacion is not None:
             try:

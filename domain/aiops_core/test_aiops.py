@@ -1125,3 +1125,22 @@ def test_modo_evidencia_detecta_causa_persistente_sin_el_llm() -> None:
     assert ciclo.incidente(inc_id).confianza == 0.5
     diag = [e for e in ciclo.auditoria.de_incidente(inc_id) if e.tipo == "diagnostico"][0]
     assert "ImagePullBackOff" in diag.datos["condiciones_escalar"][0]
+
+
+@pytest.mark.parametrize(("breaker", "confianza"), [(3, 0.5), (0, 0.9)])
+def test_modo_evidencia_recurrencia_sigue_al_cortacircuito(breaker: int, confianza: float) -> None:
+    """Dos remediaciones del mismo servicio en la hora escalan, salvo con el cortacircuito
+    apagado (AIOPS_BREAKER_MAX=0, como en el experimento: fallas inyectadas en serie)."""
+    import types
+
+    ciclo, env, a = armar(max_acciones_servicio=breaker)
+    previa = types.SimpleNamespace(
+        id="X",
+        alerta=types.SimpleNamespace(servicio="checkout"),
+        resuelto_autonomo=True,
+        abierto_en=ciclo._reloj() - 60,
+    )
+    reales = ciclo._repo.listar
+    ciclo._repo.listar = lambda: [*reales(), previa, previa]  # type: ignore[method-assign,list-item]
+    inc_id = _diagnosticar(ciclo, a, evidencia_cumplida=True)
+    assert ciclo.incidente(inc_id).confianza == confianza
