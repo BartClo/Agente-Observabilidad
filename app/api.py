@@ -560,6 +560,17 @@ def seleccionar_respaldo_llm(body: dict[str, Any]) -> dict[str, Any]:
     return llm_config.estado()
 
 
+@app.post("/config/llm/modelos", dependencies=_ADMIN)
+def modelos_llm(body: dict[str, Any]) -> list[str]:
+    """Modelos disponibles del proveedor, con la key recibida (aun sin guardar) o la guardada."""
+    from infra import llm_config
+
+    proveedor, key = body.get("proveedor"), body.get("api_key") or None
+    if not isinstance(proveedor, str) or (key is not None and not isinstance(key, str)):
+        raise HTTPException(422, "falta 'proveedor'")
+    return list(_config_llm(llm_config.listar_modelos, proveedor, key))
+
+
 @app.post("/config/llm/probar", dependencies=_ADMIN)
 def probar_llm(body: dict[str, Any]) -> dict[str, Any]:
     from infra import llm_config

@@ -179,3 +179,42 @@ def test_api_key_devuelve_la_key_descifrada() -> None:
     assert llm_config.api_key("anthropic") == KEY
     with pytest.raises(ConfigLLMError, match="no hay API key"):
         llm_config.api_key("openai")
+
+
+def test_nombres_de_modelos_filtra_lo_que_no_es_chat() -> None:
+    google = {
+        "models": [
+            {"name": "models/gemini-2.5-flash", "supportedGenerationMethods": ["generateContent"]},
+            {"name": "models/gemini-embedding-001", "supportedGenerationMethods": ["embedContent"]},
+            {
+                "name": "models/gemini-3.1-flash-image",
+                "supportedGenerationMethods": ["generateContent"],
+            },
+            {"name": "models/lyria-3.5", "supportedGenerationMethods": ["generateContent"]},
+        ]
+    }
+    assert llm_config.nombres_de_modelos("google", google) == ["gemini-2.5-flash"]
+    openai = {
+        "data": [
+            {"id": "gpt-5"},
+            {"id": "text-embedding-3-small"},
+            {"id": "o3"},
+            {"id": "whisper-1"},
+        ]
+    }
+    assert llm_config.nombres_de_modelos("openai", openai) == ["o3", "gpt-5"]
+    assert llm_config.nombres_de_modelos("deepseek", {"data": [{"id": "deepseek-chat"}]}) == [
+        "deepseek-chat"
+    ]
+
+
+def test_listar_modelos_no_filtra_la_key_en_el_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    import urllib.request
+
+    def falla(*_: object, **__: object) -> None:
+        raise OSError("rechazado para sk-secreta-123")
+
+    monkeypatch.setattr(urllib.request, "urlopen", falla)
+    with pytest.raises(llm_config.ConfigLLMError) as exc:
+        llm_config.listar_modelos("openai", api_key="sk-secreta-123")
+    assert "sk-secreta-123" not in str(exc.value) and "***" in str(exc.value)
