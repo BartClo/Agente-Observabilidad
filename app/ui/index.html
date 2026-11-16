@@ -306,6 +306,17 @@
       <p class="sub" style="margin:0" id="obs-estado">–</p>
     </section>
 
+    <section class="panel" id="sec-rag" aria-labelledby="rag-titulo">
+      <div class="cabeza"><h2 id="rag-titulo">Conocimiento (opcional)</h2><span class="espacio"></span>
+        <span id="rag-cuenta" class="chip"></span></div>
+      <p class="sub" style="margin:0">Fichas de servicio, arquitectura, postmortems o procedimientos (.md o .pdf, hasta 10 MB). El agente los consulta para informar su diagnóstico; nunca deciden la acción. Se indexan con la key de Google guardada en «Modelo del agente».</p>
+      <div class="barra" style="margin-top:12px">
+        <input type="file" id="rag-archivo" accept=".md,.pdf" multiple aria-label="Documentos">
+        <button id="rag-subir" class="primario">Subir e indexar</button></div>
+      <p class="resultado" id="rag-resultado" role="status"></p>
+      <ul id="rag-lista" class="sub" style="margin:8px 0 0;padding-left:18px"></ul>
+    </section>
+
     <section class="panel" id="sec-jira" aria-labelledby="jira-titulo">
       <div class="cabeza"><h2 id="jira-titulo">Jira (opcional)</h2><span class="espacio"></span>
         <span id="jira-estado" class="estado-jira">sin conectar</span></div>
@@ -606,13 +617,14 @@ function pintarLLM(cfg) {
   pintarSetup();
 }
 
-let estadoChat = null, estadoJira = null, estadoObs = null;
+let estadoChat = null, estadoJira = null, estadoObs = null, docsRAG = null;
 function pintarSetup() {
   const pasos = [
     ["Modelo del agente", "sec-llm", !!cfgLLM?.activo.proveedor, false],
     ["Google Chat", "sec-gchat", !!estadoChat?.configurado, false],
     ["Prometheus y Loki", "sec-obs", !!estadoObs && estadoObs.every((s) => s.ok !== false) && estadoObs.some((s) => s.ok), false],
   ];
+  pasos.push(["Conocimiento", "sec-rag", (docsRAG?.length ?? 0) > 0, true]);
   if ($("sec-jira")) pasos.push(["Jira", "sec-jira", !!estadoJira?.activo, true]);
   const actual = pasos.find((x) => !x[2] && !x[3]);
   const ol = $("setup"); ol.replaceChildren();
@@ -672,8 +684,48 @@ async function accionLLM(ruta, opciones) {
   catch (e) { $("estado").textContent = "Error: " + e.message; }
 }
 
+async function cargarRAG() {
+  try {
+    docsRAG = await admin("/conocimiento");
+    const ul = $("rag-lista"); ul.replaceChildren();
+    docsRAG.forEach((d) => {
+      const li = el("li", `${d.nombre} · ${d.tipo} · ${d.paginas} pág. ${d.obsoleto ? "· obsoleto " : ""}`);
+      const b = el("button", "Borrar", "peligro"); b.style.marginLeft = "8px";
+      b.addEventListener("click", async () => {
+        try { await admin(`/conocimiento/${d.id}`, { method: "DELETE" }); cargarRAG(); }
+        catch (e) { resultado("rag-resultado", false, "Error: " + e.message); }
+      });
+      li.append(b); ul.append(li);
+    });
+    $("rag-cuenta").textContent = docsRAG.length ? `${docsRAG.length} documentos` : "sin documentos";
+  } catch (e) { $("rag-cuenta").textContent = "no disponible"; }
+  pintarSetup();
+}
+const aBase64 = (f) => new Promise((ok, mal) => {
+  const r = new FileReader();
+  r.onload = () => ok(String(r.result).split(",")[1] || "");
+  r.onerror = () => mal(r.error); r.readAsDataURL(f);
+});
+$("rag-subir").addEventListener("click", async () => {
+  const archivos = [...$("rag-archivo").files];
+  if (!archivos.length) { resultado("rag-resultado", false, "Elige uno o más archivos."); return; }
+  $("rag-subir").disabled = true;
+  const hechos = [];
+  try {
+    for (const f of archivos) {
+      resultado("rag-resultado", null, `Indexando ${f.name}…`);
+      await admin("/conocimiento", { method: "POST", body: JSON.stringify({ nombre: f.name, contenido_b64: await aBase64(f) }) });
+      hechos.push(f.name);
+    }
+    resultado("rag-resultado", true, `Listo: ${hechos.join(", ")}`);
+    $("rag-archivo").value = "";
+  } catch (e) { resultado("rag-resultado", false, `Error${hechos.length ? " (ya subidos: " + hechos.join(", ") + ")" : ""}: ${e.message}`); }
+  $("rag-subir").disabled = false;
+  cargarRAG();
+});
+
 async function cargarConfig() {
-  cargarChat(); cargarObs();
+  cargarChat(); cargarObs(); cargarRAG();
   try { pintarLLM(await admin("/config/llm")); } catch (e) { $("estado").textContent = "Error: " + e.message; return; }
   try { pintarJira(await admin("/config/jira")); } catch (e) { $("estado").textContent = "Error: " + e.message; }
 }

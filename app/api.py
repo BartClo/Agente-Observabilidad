@@ -576,6 +576,63 @@ def probar_llm(body: dict[str, Any]) -> dict[str, Any]:
     return {"ok": ok, "detalle": detalle}
 
 
+# --- Conocimiento (RAG): documentos que el agente consulta con buscar_conocimiento
+
+
+_MAX_DOC_BYTES = 10 * 1024 * 1024
+
+
+@app.get("/conocimiento", dependencies=_ADMIN)
+def listar_conocimiento() -> list[dict[str, Any]]:
+    from rag import store
+
+    return store.listar_documentos()
+
+
+@app.post("/conocimiento", dependencies=_ADMIN)
+def subir_conocimiento(body: dict[str, Any]) -> dict[str, Any]:
+    """Body: {nombre, contenido_b64, tipo?}. .md o .pdf; se indexa con la key de Gemini
+    guardada. Mismo camino que `python -m rag.cli indexar`."""
+    import base64
+    import binascii
+
+    from rag import ingest
+    from rag.embeddings import ErrorEmbeddings
+
+    nombre, b64, tipo = body.get("nombre"), body.get("contenido_b64"), body.get("tipo") or "otro"
+    if not isinstance(nombre, str) or not isinstance(b64, str) or not isinstance(tipo, str):
+        raise HTTPException(422, "faltan 'nombre' y 'contenido_b64'")
+    nombre = Path(nombre).name
+    if Path(nombre).suffix.lower() not in {".md", ".pdf"}:
+        raise HTTPException(422, "solo .md o .pdf")
+    try:
+        datos = base64.b64decode(b64, validate=True)
+    except (binascii.Error, ValueError) as exc:
+        raise HTTPException(422, "contenido_b64 invalido") from exc
+    if len(datos) > _MAX_DOC_BYTES:
+        raise HTTPException(413, "el archivo supera 10 MB")
+    try:
+        if nombre.lower().endswith(".pdf"):
+            doc, paginas = ingest.leer_pdf(datos, nombre, tipo=tipo)
+        else:
+            doc, paginas = ingest.leer_markdown(datos.decode("utf-8"), nombre, "subido", tipo)
+        return {"id": ingest.indexar(doc, paginas), "nombre": nombre}
+    except UnicodeDecodeError as exc:
+        raise HTTPException(422, "el .md no es UTF-8") from exc
+    except ingest.ErrorIngesta as exc:
+        raise HTTPException(422, str(exc)) from exc
+    except ErrorEmbeddings as exc:
+        raise HTTPException(502, f"no se pudieron calcular los embeddings: {exc}") from exc
+
+
+@app.delete("/conocimiento/{documento_id}", dependencies=_ADMIN)
+def borrar_conocimiento(documento_id: int) -> dict[str, Any]:
+    from rag import store
+
+    store.borrar_documento(documento_id)
+    return {"ok": True}
+
+
 # --- Jira Cloud como fuente de incidentes (infra/jira_config.py, agents/aiops/jira_poller.py)
 
 
