@@ -12,7 +12,8 @@ propietario: PLACEHOLDER
 **Condiciones de aplicacion:** alerta `PodCrashLooping` o `PodFailed`, pod
 gestionado por un controlador que lo repone.
 
-**Evidencia esperada:** `pod_ready == 0`; reinicios crecientes del contenedor.
+**Evidencia esperada:** `pod_ready == 0`, con el contenedor reiniciandose (reinicios
+crecientes) o sin pasar la readiness probe (eventos `Unhealthy`).
 
 **Accion autorizada:** `recreate_pod` (elimina el pod; el controlador crea uno nuevo).
 
