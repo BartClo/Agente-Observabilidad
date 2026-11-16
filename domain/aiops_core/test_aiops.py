@@ -1020,3 +1020,26 @@ def test_un_nivel_que_ejecuta_no_es_simulacro() -> None:
     inc_id = preparar(ciclo, a)
     res = ciclo.ejecutar_remediacion(inc_id, aprobada=False)
     assert res.ejecutada and "SIMULACRO" not in res.mensaje
+
+
+def test_criticas_autonomas_actuan_dentro_del_catalogo_y_de_los_topes() -> None:
+    ciclo, env, a = armar(severidad=Severidad.CRITICA, criticas_autonomas=True)
+    inc_id = preparar(ciclo, a)
+    assert ciclo.incidente(inc_id).elegible
+    assert ciclo.ejecutar_remediacion(inc_id, aprobada=False).veredicto is Veredicto.PERMITIR
+    assert env.acciones_ejecutadas  # actuo
+
+    # La severidad deja de bloquear, el resto de la politica no: confianza baja escala.
+    ciclo, env, a = armar(severidad=Severidad.CRITICA, criticas_autonomas=True)
+    assert (
+        ciclo.ejecutar_remediacion(preparar(ciclo, a, confianza=0.5), aprobada=False).veredicto
+        is Veredicto.DENEGAR
+    )
+    assert env.acciones_ejecutadas == []
+
+
+def test_politica_desde_entorno_lee_criticas_autonomas() -> None:
+    from domain.aiops_core.politicas import politica_desde_entorno
+
+    assert not politica_desde_entorno({}).criticas_autonomas
+    assert politica_desde_entorno({"AIOPS_CRITICAS_AUTONOMAS": "1"}).criticas_autonomas

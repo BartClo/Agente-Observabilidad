@@ -45,7 +45,8 @@ En el perfil, `nivel: 3` en las categorias que puede resolver solo. Luego
 `docker compose -p aiops ... up -d`.
 
 Lo que sigue escalando aunque este activo:
-- alertas de severidad **critica** (politica del agente: fuera del alcance autonomo);
+- alertas de severidad **critica**, salvo con `AIOPS_CRITICAS_AUTONOMAS=1` en aiops.env (entonces
+  la severidad no decide: actua si la categoria, el nivel y la confianza lo permiten);
 - servicios que no estan en `/etc/aiops/servicios-permitidos`;
 - confianza bajo el umbral (0,80) o kill switch activo.
 

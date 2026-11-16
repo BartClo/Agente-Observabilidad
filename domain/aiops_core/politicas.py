@@ -45,6 +45,9 @@ class Politica:
     # Perfil de ambiente: nivel por categoria; `nivel` sigue siendo el tope global. Una
     # categoria que no figura queda en observacion. None = solo el nivel global.
     niveles_categoria: Mapping[str, NivelAutonomia] | None = None
+    # False (experimento de la tesis): una alerta critica siempre escala. True: la severidad
+    # no decide; actua si la categoria, el nivel, la confianza y los topes lo permiten.
+    criticas_autonomas: bool = False
 
     def nivel_de(self, categoria_id: str | None) -> NivelAutonomia:
         if self.niveles_categoria is None:
@@ -71,7 +74,7 @@ class Politica:
             return _denegar(f"autonomia nivel {int(nivel)}: solo observa/recomienda")
         if categoria is None or not incidente.elegible:
             return _denegar("incidente no elegible L1")
-        if incidente.alerta.severidad is Severidad.CRITICA:
+        if incidente.alerta.severidad is Severidad.CRITICA and not self.criticas_autonomas:
             return _denegar("severidad critica: fuera del alcance autonomo")
         esperada = categoria.rollback if es_rollback else categoria.accion
         if accion != esperada:
@@ -129,4 +132,5 @@ def politica_desde_entorno(env: Mapping[str, str] | None = None) -> Politica:
         max_acciones_servicio=int(env.get("AIOPS_BREAKER_MAX", "3")),
         ventana_cortacircuito_s=float(env.get("AIOPS_BREAKER_WINDOW_S", "3600")),
         kill_switch=kill_switch,
+        criticas_autonomas=env.get("AIOPS_CRITICAS_AUTONOMAS", "") == "1",
     )

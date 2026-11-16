@@ -229,7 +229,7 @@ class Ciclo:
             inc.categoria_id = categoria.id
             if not categoria.remediable:
                 motivos.append("categoria de solo deteccion: sin accion autorizada")
-        if inc.alerta.severidad is Severidad.CRITICA:
+        if inc.alerta.severidad is Severidad.CRITICA and not self.politica.criticas_autonomas:
             motivos.append("severidad critica")
         inc.elegible = not motivos
         inc.estado = Estado.CLASIFICADO
