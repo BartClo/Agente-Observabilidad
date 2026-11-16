@@ -44,8 +44,8 @@ PROVEEDORES: dict[str, Proveedor] = {
     for p in (
         Proveedor("anthropic", "Anthropic", "anthropic", "claude-sonnet-5-5"),
         Proveedor("openai", "OpenAI", "openai", "ver docs de OpenAI"),
-        Proveedor("google", "Google Gemini", "google_genai", "ver docs de Gemini"),
-        Proveedor("deepseek", "DeepSeek", "deepseek", "ver docs de DeepSeek"),
+        Proveedor("google", "Google Gemini", "google_genai", "gemini-2.5-flash"),
+        Proveedor("deepseek", "DeepSeek", "deepseek", "deepseek-chat"),
     )
 }
 

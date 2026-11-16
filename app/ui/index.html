@@ -73,6 +73,37 @@
   #ingreso label { display: flex; flex-direction: column; gap: 6px; font-weight: 500; }
   #ingreso input, #ingreso button { height: 44px; }
   #ingreso-error { color: var(--bad); min-height: 1.5em; margin: 0; }
+  /* Configuracion: puesta en marcha y tarjetas de proveedor */
+  .setup { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; padding: 0; list-style: none; }
+  .config-grid { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start; }
+  .config-lado { flex: 1 1 240px; max-width: 300px; position: sticky; top: 72px; }
+  .config-main { flex: 999 1 560px; min-width: 0; display: grid; gap: 16px; }
+  @media (max-width: 860px) { .config-lado { max-width: none; position: static; } }
+  .setup { flex-direction: column; }
+  .setup li { display: flex; align-items: center; gap: 8px; padding: 0; border: 1px solid var(--line);
+              border-radius: var(--radio); background: var(--panel); font-weight: 500; }
+  .setup li a { flex: 1; display: flex; align-items: center; gap: 10px; padding: 10px 12px; color: inherit;
+                text-decoration: none; min-height: 44px; box-sizing: border-box; }
+  .setup li.actual { border: 2px solid var(--accent); }
+  .setup li .cuando { margin-left: auto; font-size: 12px; color: var(--muted); font-weight: 400; }
+  .setup li .marca { width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center;
+                     font-size: 12px; background: var(--chip); color: var(--muted); }
+  .setup li.listo .marca { background: var(--ok-soft); color: var(--ok); }
+  .setup li.opcional { color: var(--muted); font-weight: 400; }
+  .progreso { height: 6px; background: var(--line); border-radius: 3px; margin: 10px 0 4px; }
+  .progreso > div { height: 6px; background: var(--accent); border-radius: 3px; width: 0; transition: width .3s; }
+  .provs { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); margin: 12px 0; }
+  .provs button { min-height: 64px; display: flex; flex-direction: column; align-items: flex-start; justify-content: center;
+                  gap: 2px; text-align: left; padding: 10px 14px; font-weight: 600; }
+  .provs button small { font-weight: 400; color: var(--muted); font-size: 12px; }
+  .provs button[aria-pressed="true"] { border: 2px solid var(--accent); background: var(--accent-soft); }
+  .provs button[aria-pressed="true"] small { color: var(--accent); }
+  .resultado { margin: 8px 0 0; padding: 8px 12px; border-radius: var(--radio); }
+  .resultado.ok { background: var(--ok-soft); color: var(--ok); }
+  .resultado.mal { background: var(--bad-soft); color: var(--bad); }
+  .resultado:empty { display: none; }
+  details.respaldo { border-top: 1px solid var(--line); margin-top: 14px; padding-top: 10px; }
+  details.respaldo summary { cursor: pointer; color: var(--accent); font-weight: 600; }
 </style>
 </head>
 <body>
@@ -130,34 +161,60 @@
       eso lo hace el agente solo o vos con los botones de arriba. Los avisos 🔔 son lo que hizo el agente.</p>
   </section>
 
-  <section class="panel" id="llm-panel" aria-labelledby="llm-titulo" hidden>
-    <div class="barra"><h2 id="llm-titulo">Modelo del agente</h2>
-      <span class="espacio"></span><span id="llm-activo" class="mono"></span></div>
-    <div id="llm-cuerpo" hidden>
-      <div class="tabla"><table>
-        <thead><tr><th>Proveedor</th><th>API key</th><th>Cargar / reemplazar</th><th></th></tr></thead>
-        <tbody id="llm-filas"></tbody>
-      </table></div>
-      <div class="barra" style="margin-top:8px">
-        <label>Proveedor <select id="llm-prov"></select></label>
-        <label>Modelo <input id="llm-modelo" size="24" spellcheck="false"></label>
-        <button id="llm-probar" class="primario">Guardar y probar</button>
-        <button id="llm-default">Volver al default</button>
+  <div id="llm-panel" hidden>
+  <div class="config-grid">
+    <aside class="config-lado panel" aria-labelledby="setup-titulo">
+      <h2 id="setup-titulo" style="margin:0">Puesta en marcha</h2>
+      <p id="setup-cuenta" class="sub" style="margin:4px 0 0">Cada paso se prueba al guardar.</p>
+      <div class="progreso"><div id="setup-barra"></div></div>
+      <ol class="setup" id="setup" style="margin-top:12px"></ol>
+    </aside>
+    <div class="config-main">
+    <section class="panel" id="sec-llm" aria-labelledby="llm-titulo">
+      <div class="cabeza"><h2 id="llm-titulo">Modelo del agente</h2><span class="espacio"></span>
+        <span id="llm-activo" class="chip"></span></div>
+      <p class="sub" style="margin:0" id="llm-pista">Elegí proveedor, pegá la key y pulsá «Guardar y probar»: se prueba con una llamada real y solo queda en uso si responde.</p>
+      <div id="llm-cuerpo" hidden>
+        <div class="provs" id="llm-provs" role="group" aria-label="Proveedor"></div>
+        <input type="hidden" id="llm-prov">
+        <div class="campos">
+          <label>Modelo <input id="llm-modelo" spellcheck="false" list="llm-sugeridos"></label>
+          <label>API key <input id="llm-key" type="password" autocomplete="off"></label>
+        </div>
+        <datalist id="llm-sugeridos"></datalist>
+        <div class="barra" style="margin-top:12px"><button id="llm-probar" class="primario">Guardar y probar</button>
+          <button id="llm-default">Volver al default</button>
+          <span class="espacio"></span><button id="llm-borrar" class="peligro" hidden>Borrar key</button></div>
+        <p class="resultado" id="llm-resultado" role="status"></p>
+        <details class="respaldo">
+          <summary>Modelo de respaldo (opcional) · <span id="resp-activo"></span></summary>
+          <p class="sub">Si el principal falla a mitad de un incidente, el respaldo lo retoma desde donde quedó. Usa la key ya guardada de su proveedor.</p>
+          <div class="campos">
+            <label>Proveedor <select id="resp-prov"></select></label>
+            <label>Modelo <input id="resp-modelo" spellcheck="false"></label>
+          </div>
+          <div class="barra" style="margin-top:8px"><button id="resp-usar">Usar como respaldo</button>
+            <button id="resp-quitar">Quitar</button></div>
+        </details>
+        <p class="sub">Cambiar el modelo durante un experimento invalida la comparación entre corridas.</p>
       </div>
-      <p class="sub" id="llm-resultado" role="status"></p>
-      <div class="barra" style="margin-top:8px">
-        <strong>Respaldo</strong>
-        <label>Proveedor <select id="resp-prov"></select></label>
-        <label>Modelo <input id="resp-modelo" size="24" spellcheck="false"></label>
-        <button id="resp-usar">Usar como respaldo</button>
-        <button id="resp-quitar">Quitar</button>
-        <span id="resp-activo" class="mono"></span>
-      </div>
-      <p class="sub">Si el modelo principal falla a mitad de un incidente, el respaldo lo retoma desde donde quedó.</p>
-      <p class="sub">Cambiar el modelo durante un experimento invalida la comparación entre corridas.
-        La key se guarda cifrada y no se vuelve a mostrar.</p>
+    </section>
+
+    <section class="panel" id="sec-gchat" aria-labelledby="chat-cfg-titulo">
+      <div class="cabeza"><h2 id="chat-cfg-titulo">Google Chat</h2><span class="espacio"></span>
+        <button id="gchat-probar">Enviar aviso de prueba</button></div>
+      <p class="sub" style="margin:0" id="gchat-estado">–</p>
+      <p class="resultado" id="gchat-resultado" role="status"></p>
+    </section>
+
+    <section class="panel" id="sec-obs" aria-labelledby="obs-titulo">
+      <div class="cabeza"><h2 id="obs-titulo">Prometheus y Loki</h2><span class="espacio"></span>
+        <button id="obs-probar">Volver a comprobar</button></div>
+      <p class="sub" style="margin:0" id="obs-estado">–</p>
+    </section>
     </div>
-  </section>
+  </div>
+  </div>
 
   <section class="panel" id="detalle" hidden>
     <h2 id="detalle-titulo">Línea de tiempo</h2>
@@ -337,40 +394,109 @@ $("kill").addEventListener("click", async () => {
 // --- Modelo del agente. Solo con sesion de admin (la API lo vuelve a verificar).
 const admin = api;
 
+const SUGERIDOS = {
+  anthropic: ["claude-sonnet-5-5", "claude-haiku-5-5"],
+  openai: [],
+  google: ["gemini-2.5-flash", "gemini-2.5-pro"],
+  deepseek: ["deepseek-chat"],
+};
+let cfgLLM = null;
+
+function elegirProveedor(id) {
+  $("llm-prov").value = id;
+  const p = cfgLLM.proveedores.find((x) => x.id === id);
+  for (const b of $("llm-provs").children) b.setAttribute("aria-pressed", String(b.dataset.id === id));
+  const dl = $("llm-sugeridos"); dl.replaceChildren();
+  for (const m of SUGERIDOS[id] || []) { const o = el("option"); o.value = m; dl.append(o); }
+  const activo = cfgLLM.activo.proveedor === id ? cfgLLM.activo.modelo : "";
+  $("llm-modelo").value = activo || (SUGERIDOS[id] || [])[0] || "";
+  $("llm-modelo").placeholder = p.ejemplo;
+  $("llm-key").value = "";
+  $("llm-key").placeholder = p.configurada ? `guardada ••••${p.sufijo} · vacío = conservar` : "pegá la API key";
+  $("llm-borrar").hidden = !p.configurada;
+}
+
 function pintarLLM(cfg) {
+  cfgLLM = cfg;
   $("llm-cuerpo").hidden = false;
   const a = cfg.activo;
-  $("llm-activo").textContent = a.proveedor ? `En uso: ${a.proveedor}:${a.modelo}` : "En uso: modelo por defecto (agent.yaml)";
-  const tbody = $("llm-filas"); tbody.replaceChildren();
-  const sel = $("llm-prov"); const previo = sel.value; sel.replaceChildren();
+  $("llm-activo").textContent = a.proveedor ? `en uso · ${a.proveedor}:${a.modelo}` : "sin modelo elegido";
+  $("llm-activo").className = "chip" + (a.proveedor ? " resuelto" : " espera");
+  const cont = $("llm-provs"); cont.replaceChildren();
   for (const p of cfg.proveedores) {
-    const tr = el("tr");
-    const key = el("input"); key.type = "password"; key.autocomplete = "off"; key.size = 20;
-    key.placeholder = "pegar API key"; key.setAttribute("aria-label", "API key de " + p.nombre);
-    const g = el("button", "Guardar");
-    g.addEventListener("click", () => accionLLM(`/config/llm/credenciales/${p.id}`,
-      { method: "PUT", body: JSON.stringify({ api_key: key.value, usuario: usuarioActual() }) }));
-    const td = el("td"); td.append(key, " ", g);
-    const borrar = el("td");
-    if (p.configurada) {
-      const b = el("button", "Borrar", "peligro");
-      b.addEventListener("click", () => confirm(`¿Borrar la key de ${p.nombre}?`) &&
-        accionLLM(`/config/llm/credenciales/${p.id}?usuario=${encodeURIComponent(usuarioActual())}`, { method: "DELETE" }));
-      borrar.append(b);
-    }
-    tr.append(el("td", p.nombre), el("td", p.configurada ? `••••${p.sufijo} (${p.actualizado_por})` : "sin key", "mono"), td, borrar);
-    tbody.append(tr);
-    const o = el("option", p.nombre + (p.configurada ? "" : " (sin key)")); o.value = p.id; o.dataset.ejemplo = p.ejemplo;
-    sel.append(o);
+    const b = el("button", p.nombre); b.type = "button"; b.dataset.id = p.id;
+    const enUso = a.proveedor === p.id;
+    b.append(el("small", enUso ? "en uso" : p.configurada ? `key ••••${p.sufijo}` : "sin key"));
+    b.addEventListener("click", () => elegirProveedor(p.id));
+    cont.append(b);
   }
+  elegirProveedor($("llm-prov").value || a.proveedor || "google");
   const rsel = $("resp-prov"); const rprevio = rsel.value; rsel.replaceChildren();
   for (const p of cfg.proveedores) { const o = el("option", p.nombre + (p.configurada ? "" : " (sin key)")); o.value = p.id; rsel.append(o); }
   rsel.value = rprevio || cfg.respaldo.proveedor || cfg.proveedores[0].id;
-  $("resp-activo").textContent = cfg.respaldo.proveedor ? `Respaldo: ${cfg.respaldo.proveedor}:${cfg.respaldo.modelo}` : "Sin respaldo";
-  sel.value = previo || a.proveedor || cfg.proveedores[0].id;
-  if (a.proveedor && !$("llm-modelo").value) $("llm-modelo").value = a.modelo;
-  $("llm-modelo").placeholder = sel.selectedOptions[0]?.dataset.ejemplo || "";
+  $("resp-activo").textContent = cfg.respaldo.proveedor ? `${cfg.respaldo.proveedor}:${cfg.respaldo.modelo}` : "sin respaldo";
+  pintarSetup();
 }
+
+let estadoChat = null, estadoJira = null, estadoObs = null;
+function pintarSetup() {
+  const pasos = [
+    ["Modelo del agente", "sec-llm", !!cfgLLM?.activo.proveedor, false],
+    ["Google Chat", "sec-gchat", !!estadoChat?.configurado, false],
+    ["Prometheus y Loki", "sec-obs", !!estadoObs && estadoObs.every((s) => s.ok !== false) && estadoObs.some((s) => s.ok), false],
+  ];
+  if ($("sec-jira")) pasos.push(["Jira", "sec-jira", !!estadoJira?.activo, true]);
+  const actual = pasos.find((x) => !x[2] && !x[3]);
+  const ol = $("setup"); ol.replaceChildren();
+  pasos.forEach(([nombre, sec, listo, opcional], i) => {
+    const li = el("li", null, [listo ? "listo" : "", opcional && !listo ? "opcional" : "", actual && actual[1] === sec ? "actual" : ""].join(" "));
+    const a = el("a"); a.href = "#" + sec;
+    a.addEventListener("click", (ev) => { ev.preventDefault(); $(sec).scrollIntoView({ behavior: "smooth", block: "start" }); });
+    a.append(el("span", listo ? "✓" : String(i + 1), "marca"), nombre);
+    if (opcional && !listo) a.append(el("span", "opcional", "cuando"));
+    li.append(a); ol.append(li);
+  });
+  const req = pasos.filter((x) => !x[3]);
+  const hechos = req.filter((x) => x[2]).length;
+  $("setup-cuenta").textContent = hechos === req.length ? "Todo listo ✅" : `${hechos} de ${req.length} listos · cada paso se prueba al guardar`;
+  $("setup-barra").style.width = `${(100 * hechos) / req.length}%`;
+}
+
+async function cargarObs() {
+  $("obs-estado").textContent = "Comprobando…";
+  try {
+    estadoObs = await admin("/config/observabilidad");
+    $("obs-estado").textContent = estadoObs.map((s) =>
+      `${s.nombre}: ${s.ok === null ? "no configurado" : (s.ok ? "✓ responde" : "✗ " + s.detalle)}${s.url ? " (" + s.url + ")" : ""}`).join(" · ");
+  } catch (e) { $("obs-estado").textContent = "Error: " + e.message; }
+  pintarSetup();
+}
+$("obs-probar").addEventListener("click", cargarObs);
+
+async function cargarChat() {
+  try {
+    estadoChat = await api("/notificaciones");
+    $("gchat-estado").textContent = estadoChat.configurado
+      ? `Webhook configurado en el servidor · enviados ${estadoChat.enviados ?? 0} · pendientes ${estadoChat.pendientes ?? 0} · fallidos ${estadoChat.fallidos ?? 0}`
+      : "Sin webhook: definí AIOPS_GCHAT_WEBHOOK_URL en aiops.env y reiniciá el agente.";
+    $("gchat-probar").disabled = !estadoChat.configurado;
+  } catch (e) { $("gchat-estado").textContent = "Error: " + e.message; }
+  pintarSetup();
+}
+
+function resultado(id, ok, texto) {
+  const n = $(id); n.textContent = texto; n.className = "resultado " + (ok === null ? "" : ok ? "ok" : "mal");
+}
+
+$("gchat-probar").addEventListener("click", async () => {
+  resultado("gchat-resultado", null, "Enviando…");
+  try { const r = await admin("/notificaciones/probar", { method: "POST" }); resultado("gchat-resultado", r.ok, (r.ok ? "✅ " : "❌ ") + r.detalle); }
+  catch (e) { resultado("gchat-resultado", false, "Error: " + e.message); }
+});
+$("llm-borrar").addEventListener("click", () => {
+  const id = $("llm-prov").value;
+  if (confirm(`¿Borrar la key de ${id}?`)) accionLLM(`/config/llm/credenciales/${id}?usuario=${encodeURIComponent(usuarioActual())}`, { method: "DELETE" });
+});
 
 async function accionLLM(ruta, opciones) {
   if (!usuarioActual()) return;
@@ -379,28 +505,29 @@ async function accionLLM(ruta, opciones) {
 }
 
 async function cargarConfig() {
+  cargarChat(); cargarObs();
   try { pintarLLM(await admin("/config/llm")); } catch (e) { $("estado").textContent = "Error: " + e.message; }
 }
-$("llm-prov").addEventListener("change", () => { $("llm-modelo").placeholder = $("llm-prov").selectedOptions[0]?.dataset.ejemplo || ""; });
 $("llm-default").addEventListener("click", () => accionLLM("/config/llm/activo",
   { method: "PUT", body: JSON.stringify({ proveedor: null, usuario: usuarioActual() }) }));
 $("resp-usar").addEventListener("click", () => accionLLM("/config/llm/respaldo",
   { method: "PUT", body: JSON.stringify({ proveedor: $("resp-prov").value, modelo: $("resp-modelo").value.trim(), usuario: usuarioActual() }) }));
 $("resp-quitar").addEventListener("click", () => accionLLM("/config/llm/respaldo",
   { method: "PUT", body: JSON.stringify({ proveedor: null, usuario: usuarioActual() }) }));
-// Guardar y probar: primero una llamada real; solo si responde, queda como modelo en uso.
+// Guardar y probar: guarda la key (si se escribio), prueba con una llamada real y solo si
+// responde la deja en uso.
 $("llm-probar").addEventListener("click", async () => {
-  const proveedor = $("llm-prov").value, modelo = $("llm-modelo").value.trim();
-  const res = $("llm-resultado");
-  if (!modelo) { res.textContent = "Indicá el modelo."; return; }
-  res.textContent = "Probando…";
+  const proveedor = $("llm-prov").value, modelo = $("llm-modelo").value.trim(), key = $("llm-key").value.trim();
+  if (!modelo) { resultado("llm-resultado", false, "Indicá el modelo."); return; }
+  resultado("llm-resultado", null, "Probando…");
   try {
+    if (key) await admin(`/config/llm/credenciales/${proveedor}`, { method: "PUT", body: JSON.stringify({ api_key: key, usuario: usuarioActual() }) });
     const t0 = performance.now();
     const r = await admin("/config/llm/probar", { method: "POST", body: JSON.stringify({ proveedor, modelo }) });
-    if (!r.ok) { res.textContent = "❌ No respondió, no se guardó: " + r.detalle; return; }
+    if (!r.ok) { resultado("llm-resultado", false, "❌ No respondió, no quedó en uso: " + r.detalle); if (key) pintarLLM(await admin("/config/llm")); return; }
     pintarLLM(await admin("/config/llm/activo", { method: "PUT", body: JSON.stringify({ proveedor, modelo, usuario: usuarioActual() }) }));
-    res.textContent = `✅ Respondió en ${((performance.now() - t0) / 1000).toFixed(1)} s · en uso ${proveedor}:${modelo}`;
-  } catch (e) { res.textContent = "Error: " + e.message; }
+    resultado("llm-resultado", true, `✅ Respondió en ${((performance.now() - t0) / 1000).toFixed(1)} s · en uso ${proveedor}:${modelo}`);
+  } catch (e) { resultado("llm-resultado", false, "Error: " + e.message); }
 });
 
 // --- Chat (solo lectura) y avisos de lo que hizo el agente.
