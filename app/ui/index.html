@@ -64,16 +64,35 @@
   .sub { color: var(--muted); font-size: 12px; }
   #estado { color: var(--muted); font-size: 12px; }
   @media (max-width: 640px) { ol.linea li { grid-template-columns: 1fr; } }
+  [hidden] { display: none !important; }
+  /* Ingreso: un solo token; el rol (admin u operador) decide que se ve */
+  #ingreso { position: fixed; inset: 0; z-index: 20; background: var(--bg); display: flex;
+             align-items: center; justify-content: center; padding: 16px; }
+  #ingreso form { width: 100%; max-width: 380px; background: var(--panel); border: 1px solid var(--line);
+                  border-radius: 12px; padding: 28px; display: flex; flex-direction: column; gap: 14px; }
+  #ingreso label { display: flex; flex-direction: column; gap: 6px; font-weight: 500; }
+  #ingreso input, #ingreso button { height: 44px; }
+  #ingreso-error { color: var(--bad); min-height: 1.5em; margin: 0; }
 </style>
 </head>
 <body>
+<div id="ingreso" hidden>
+  <form id="ingreso-form">
+    <h2 style="margin:0">AIOps · ingresar</h2>
+    <p class="sub" style="margin:0">Un solo token. Si es de administrador, verás también el modelo del agente.</p>
+    <label>Tu nombre <input id="ingreso-usuario" autocomplete="username" required placeholder="ana@equipo"></label>
+    <label>Token de acceso <input id="ingreso-token" type="password" autocomplete="off" required></label>
+    <p id="ingreso-error" role="alert"></p>
+    <button type="submit" class="primario">Entrar</button>
+    <p class="sub" style="margin:0">La sesión dura 8 h. Tu nombre queda en la auditoría.</p>
+  </form>
+</div>
 <main>
   <div class="panel barra">
     <h1>AIOps · incidentes L1</h1>
     <span class="espacio"></span>
-    <label>Usuario <input id="usuario" placeholder="ana@equipo" autocomplete="username" size="14"></label>
-    <label>Token <input id="token" type="password" autocomplete="off" size="14"></label>
-    <button id="guardar" class="primario">Conectar</button>
+    <span id="quien" class="sub"></span>
+    <button id="salir">Salir</button>
     <span id="estado" role="status" aria-live="polite"></span>
   </div>
 
@@ -94,7 +113,7 @@
       <table>
         <thead><tr><th>Incidente</th><th>Alerta</th><th>Servicio</th><th>Estado</th>
           <th>Autónomo</th><th>Decisión humana</th></tr></thead>
-        <tbody id="filas"><tr><td colspan="6" class="vacio">Conectar con el token para ver los incidentes.</td></tr></tbody>
+        <tbody id="filas"><tr><td colspan="6" class="vacio">Ingresá para ver los incidentes.</td></tr></tbody>
       </table>
     </div>
   </section>
@@ -111,13 +130,9 @@
       eso lo hace el agente solo o vos con los botones de arriba. Los avisos 🔔 son lo que hizo el agente.</p>
   </section>
 
-  <section class="panel" aria-labelledby="llm-titulo">
-    <h2 id="llm-titulo">Modelo del agente</h2>
-    <div class="barra">
-      <label>Token admin <input id="admin-token" type="password" autocomplete="off" size="14"></label>
-      <button id="llm-cargar">Ver configuración</button>
-      <span id="llm-activo" class="mono"></span>
-    </div>
+  <section class="panel" id="llm-panel" aria-labelledby="llm-titulo" hidden>
+    <div class="barra"><h2 id="llm-titulo">Modelo del agente</h2>
+      <span class="espacio"></span><span id="llm-activo" class="mono"></span></div>
     <div id="llm-cuerpo" hidden>
       <div class="tabla"><table>
         <thead><tr><th>Proveedor</th><th>API key</th><th>Cargar / reemplazar</th><th></th></tr></thead>
@@ -126,10 +141,10 @@
       <div class="barra" style="margin-top:8px">
         <label>Proveedor <select id="llm-prov"></select></label>
         <label>Modelo <input id="llm-modelo" size="24" spellcheck="false"></label>
-        <button id="llm-probar">Probar conexión</button>
-        <button id="llm-usar" class="primario">Usar este modelo</button>
+        <button id="llm-probar" class="primario">Guardar y probar</button>
         <button id="llm-default">Volver al default</button>
       </div>
+      <p class="sub" id="llm-resultado" role="status"></p>
       <div class="barra" style="margin-top:8px">
         <strong>Respaldo</strong>
         <label>Proveedor <select id="resp-prov"></select></label>
@@ -157,8 +172,7 @@ const leer = (k) => { try { return sessionStorage.getItem(k) || ""; } catch { re
 const guardar = (k, v) => { try { sessionStorage.setItem(k, v); } catch {} };
 let seleccionado = null;
 
-$("token").value = leer("aiops-token");
-$("usuario").value = leer("aiops-usuario");
+let sesion = null;  // {usuario, rol}: la cookie es HttpOnly, el token nunca queda en el navegador
 
 function el(tag, texto, clase) {
   const n = document.createElement(tag);
@@ -167,11 +181,12 @@ function el(tag, texto, clase) {
   return n;
 }
 
-async function api(ruta, opciones = {}, token = leer("aiops-token")) {
+async function api(ruta, opciones = {}) {
   const r = await fetch(ruta, {
-    ...opciones,
-    headers: { "Authorization": "Bearer " + token, "Content-Type": "application/json" },
+    ...opciones, credentials: "same-origin",
+    headers: { "X-AIOPS-UI": "1", "Content-Type": "application/json" },
   });
+  if (r.status === 401 && !ruta.startsWith("/sesion")) pedirIngreso();
   if (!r.ok) {
     let detalle = r.statusText;
     try { detalle = (await r.json()).detail || detalle; } catch {}
@@ -187,11 +202,39 @@ function estadoChip(i) {
   return el("span", i.estado, "chip " + i.estado);
 }
 
-function usuarioActual() {
-  const u = $("usuario").value.trim();
-  if (!u) { $("estado").textContent = "Indicá tu usuario: queda registrado en la auditoría."; $("usuario").focus(); }
-  return u;
+function usuarioActual() { return sesion ? sesion.usuario : ""; }
+
+function pedirIngreso() {
+  sesion = null;
+  $("ingreso").hidden = false;
+  $("ingreso-usuario").value = leer("aiops-usuario");
+  ($("ingreso-usuario").value ? $("ingreso-token") : $("ingreso-usuario")).focus();
 }
+
+function entrar(s) {
+  sesion = s;
+  $("ingreso").hidden = true;
+  $("quien").textContent = `${s.usuario} · ${s.rol}`;
+  $("llm-panel").hidden = s.rol !== "admin";
+  if (s.rol === "admin") cargarConfig();
+  refrescar(); avisos();
+}
+
+$("ingreso-form").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  $("ingreso-error").textContent = "";
+  const usuario = $("ingreso-usuario").value.trim();
+  try {
+    const s = await api("/sesion", { method: "POST", body: JSON.stringify({ usuario, token: $("ingreso-token").value }) });
+    guardar("aiops-usuario", usuario);
+    $("ingreso-token").value = "";
+    entrar(s);
+  } catch (e) { $("ingreso-error").textContent = e.message.startsWith("401") ? "Token inválido." : "Error: " + e.message; }
+});
+$("salir").addEventListener("click", async () => {
+  try { await api("/sesion", { method: "DELETE" }); } catch {}
+  pedirIngreso();
+});
 
 async function decidir(id, veredicto) {
   const usuario = usuarioActual();
@@ -260,7 +303,7 @@ async function verDetalle(id) {
 }
 
 async function refrescar() {
-  if (!leer("aiops-token")) return;
+  if (!sesion) return;
   try {
     const [incidentes, m, ks] = await Promise.all([api("/incidentes"), api("/metricas"), api("/kill-switch")]);
     pintarFilas(incidentes);
@@ -280,13 +323,6 @@ async function refrescar() {
   } catch (e) { $("estado").textContent = "Error: " + e.message; }
 }
 
-$("guardar").addEventListener("click", () => {
-  guardar("aiops-token", $("token").value.trim());
-  guardar("aiops-usuario", $("usuario").value.trim());
-  $("estado").textContent = "";
-  refrescar();
-});
-$("usuario").addEventListener("change", () => guardar("aiops-usuario", $("usuario").value.trim()));
 $("kill").addEventListener("click", async () => {
   const usuario = usuarioActual(); if (!usuario) return;
   const activar = !$("kill").dataset.activo;
@@ -298,8 +334,8 @@ $("kill").addEventListener("click", async () => {
   } catch (e) { $("estado").textContent = "Error: " + e.message; }
 });
 
-// --- Modelo del agente. El token admin queda solo en memoria (no en sessionStorage).
-const admin = (ruta, opciones) => api(ruta, opciones, $("admin-token").value.trim());
+// --- Modelo del agente. Solo con sesion de admin (la API lo vuelve a verificar).
+const admin = api;
 
 function pintarLLM(cfg) {
   $("llm-cuerpo").hidden = false;
@@ -342,24 +378,29 @@ async function accionLLM(ruta, opciones) {
   catch (e) { $("estado").textContent = "Error: " + e.message; }
 }
 
-$("llm-cargar").addEventListener("click", async () => {
+async function cargarConfig() {
   try { pintarLLM(await admin("/config/llm")); } catch (e) { $("estado").textContent = "Error: " + e.message; }
-});
+}
 $("llm-prov").addEventListener("change", () => { $("llm-modelo").placeholder = $("llm-prov").selectedOptions[0]?.dataset.ejemplo || ""; });
-$("llm-usar").addEventListener("click", () => accionLLM("/config/llm/activo",
-  { method: "PUT", body: JSON.stringify({ proveedor: $("llm-prov").value, modelo: $("llm-modelo").value.trim(), usuario: usuarioActual() }) }));
 $("llm-default").addEventListener("click", () => accionLLM("/config/llm/activo",
   { method: "PUT", body: JSON.stringify({ proveedor: null, usuario: usuarioActual() }) }));
 $("resp-usar").addEventListener("click", () => accionLLM("/config/llm/respaldo",
   { method: "PUT", body: JSON.stringify({ proveedor: $("resp-prov").value, modelo: $("resp-modelo").value.trim(), usuario: usuarioActual() }) }));
 $("resp-quitar").addEventListener("click", () => accionLLM("/config/llm/respaldo",
   { method: "PUT", body: JSON.stringify({ proveedor: null, usuario: usuarioActual() }) }));
+// Guardar y probar: primero una llamada real; solo si responde, queda como modelo en uso.
 $("llm-probar").addEventListener("click", async () => {
-  $("estado").textContent = "Probando…";
+  const proveedor = $("llm-prov").value, modelo = $("llm-modelo").value.trim();
+  const res = $("llm-resultado");
+  if (!modelo) { res.textContent = "Indicá el modelo."; return; }
+  res.textContent = "Probando…";
   try {
-    const r = await admin("/config/llm/probar", { method: "POST", body: JSON.stringify({ proveedor: $("llm-prov").value, modelo: $("llm-modelo").value.trim() }) });
-    $("estado").textContent = (r.ok ? "OK: " : "Falló: ") + r.detalle;
-  } catch (e) { $("estado").textContent = "Error: " + e.message; }
+    const t0 = performance.now();
+    const r = await admin("/config/llm/probar", { method: "POST", body: JSON.stringify({ proveedor, modelo }) });
+    if (!r.ok) { res.textContent = "❌ No respondió, no se guardó: " + r.detalle; return; }
+    pintarLLM(await admin("/config/llm/activo", { method: "PUT", body: JSON.stringify({ proveedor, modelo, usuario: usuarioActual() }) }));
+    res.textContent = `✅ Respondió en ${((performance.now() - t0) / 1000).toFixed(1)} s · en uso ${proveedor}:${modelo}`;
+  } catch (e) { res.textContent = "Error: " + e.message; }
 });
 
 // --- Chat (solo lectura) y avisos de lo que hizo el agente.
@@ -383,7 +424,7 @@ const TEXTO_EVENTO = {
 const OCULTOS = new Set(["costo_llm"]);
 
 async function avisos() {
-  if (!leer("aiops-token")) return;
+  if (!sesion) return;
   try {
     const evs = await api(`/eventos?desde=${ultimoEvento}&limite=${ultimoEvento ? 50 : 10}`);
     for (const e of evs) {
@@ -414,7 +455,7 @@ $("chat-nueva").addEventListener("click", () => {
   $("chat-log").replaceChildren(); ultimoEvento = 0; avisos();
 });
 
-refrescar(); avisos();
+api("/sesion").then(entrar).catch(pedirIngreso);
 setInterval(refrescar, 5000);
 setInterval(avisos, 5000);
 </script>
