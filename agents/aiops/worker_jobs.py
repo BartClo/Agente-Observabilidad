@@ -89,6 +89,9 @@ def procesar_alerta_webhook(alerta_dict: dict[str, Any], es_firing: bool) -> str
         return f"{alerta.id}: resuelta en origen, auditada (sin cerrar)"
 
     with bloqueo_servicio(alerta.servicio):
+        ventana = float(os.environ.get("AIOPS_AGRUPAR_VENTANA_S", "900"))
+        if (grupo := ciclo.agrupar(alerta, ventana)) is not None:
+            return f"{alerta.id}: agrupada en {grupo.id} (mismo servicio), sin incidente nuevo"
         inc = ciclo.abrir_desde_alerta(alerta)
         try:
             atender_con_agente(ciclo, inc.id, alerta)

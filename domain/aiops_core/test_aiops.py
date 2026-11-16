@@ -1043,3 +1043,28 @@ def test_politica_desde_entorno_lee_criticas_autonomas() -> None:
 
     assert not politica_desde_entorno({}).criticas_autonomas
     assert politica_desde_entorno({"AIOPS_CRITICAS_AUTONOMAS": "1"}).criticas_autonomas
+
+
+def test_alertas_del_mismo_servicio_se_agrupan_en_un_incidente() -> None:
+    import dataclasses
+
+    ciclo, env, a = armar()
+    inc = ciclo.abrir(a)
+    primera = ciclo.incidente(inc.id).alerta
+    otra = dataclasses.replace(
+        primera, id="ContainerUnhealthy:checkout", nombre="ContainerUnhealthy"
+    )
+    agrupado = ciclo.agrupar(otra, 900)
+    assert agrupado is not None and agrupado.id == inc.id
+    assert any(e.tipo == "alerta_agrupada" for e in ciclo.auditoria.de_incidente(inc.id))
+    # Otro servicio, la misma alerta (reintento) o ventana 0: no agrupa.
+    assert ciclo.agrupar(dataclasses.replace(otra, servicio="pagos"), 900) is None
+    assert ciclo.agrupar(primera, 900) is None
+    assert ciclo.agrupar(otra, 0) is None
+    # Escalado reciente agrupa; resuelto no (una recurrencia real abre incidente nuevo).
+    ciclo.escalar(inc.id, "x")
+    assert ciclo.agrupar(otra, 900) is not None
+    inc2 = ciclo.incidente(inc.id)
+    inc2.estado = Estado.RESUELTO
+    ciclo._guardar(inc2)
+    assert ciclo.agrupar(otra, 900) is None

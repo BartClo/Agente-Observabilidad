@@ -161,6 +161,26 @@ class Ciclo:
             return existente
         return self._abrir_o_reusar(alerta, origen="webhook")
 
+    def agrupar(self, alerta: Alerta, ventana_s: float) -> Incidente | None:
+        """Una caida dispara varias reglas a la vez (ServiceDown, ContainerUnhealthy, sonda
+        sintetica...). Si OTRA alerta del mismo servicio ya tiene un incidente en curso, o uno
+        escalado hace menos de `ventana_s`, esta se anota ahi y no abre otro: un solo
+        diagnostico, un solo reinicio, un solo aviso. Un resuelto o descartado no agrupa: si
+        vuelve a fallar es una recurrencia real. La misma alerta (reintento del job) no agrupa."""
+        if ventana_s <= 0:
+            return None
+        ahora = self._reloj()
+        # ponytail: recorre todos los incidentes; filtrar por servicio en SQL si crecen mucho.
+        for inc in reversed(self._repo.listar()):
+            if inc.alerta.servicio != alerta.servicio or inc.alerta.id == alerta.id:
+                continue
+            en_curso = inc.estado not in self._ESTADOS_TERMINALES
+            escalado_reciente = inc.estado is Estado.ESCALADO and ahora - inc.abierto_en < ventana_s
+            if en_curso or escalado_reciente:
+                self.auditoria.registrar(inc.id, "alerta_agrupada", alerta=alerta.nombre)
+                return inc
+        return None
+
     def notificar_resuelta_en_origen(self, alerta: Alerta) -> None:
         """El webhook de Grafana manda `status: resolved` para esta alerta. Se audita
         como evidencia, pero no cierra nada: solo el agente cierra, y solo tras
