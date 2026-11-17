@@ -66,6 +66,29 @@ scrape_configs:
       - target_label: __address__
         replacement: blackbox-exporter:9115
 
+  # Laboratorio Docker (perfil docker-lab de docker-compose.yml). Estado de contenedores:
+  # docker-lab/exportador.py en el host, con las series del exportador de AI Factory.
+  - job_name: docker-lab-estado
+    static_configs:
+      - targets: ["host.docker.internal:9417"]
+        labels: {env: dev}
+
+  # Servicio que deja de responder con el contenedor vivo (docker_servicio_caido.sh).
+  - job_name: blackbox-docker-lab
+    metrics_path: /probe
+    params:
+      module: [http_2xx]
+    static_configs:
+      - targets: ["http://ia-factory-lab-worker:8080/"]
+        labels: {service: lab-worker, env: dev}
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox-exporter:9115
+
   # Metricas del propio agente (app/api.py /metrics): TRA, MTTR, incidentes por estado,
   # acciones. Las grafica el dashboard "AIOps" (Fase 5).
   - job_name: aiops-api

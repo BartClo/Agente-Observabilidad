@@ -21,3 +21,7 @@ k8s-lab/.secrets/
 resultados/*
 !resultados/linea_base.ejemplo.csv
 deploy/aifactory/aiops.env
+
+# Laboratorio Docker: cola de solicitudes y log del ejecutor del host
+docker-lab/solicitudes/
+docker-lab/ejecutor.log

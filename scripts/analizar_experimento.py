@@ -121,12 +121,22 @@ def main(argv: list[str]) -> int:
     p.add_argument("csv")
     p.add_argument("--linea-base", default=None, help="CSV de la linea base manual")
     p.add_argument(
+        "--perfil",
+        default=None,
+        help="perfil del experimento (perfiles/docker-lab.yaml): sus categorias son el catalogo",
+    )
+    p.add_argument(
         "--fase",
         choices=("final", "ajuste", "todas"),
         default="final",
         help="que corridas analizar; el resultado de la tesis es --fase final",
     )
     args = p.parse_args(argv)
+    if args.perfil:
+        from domain.aiops_core.catalogo import activar_catalogo
+        from infra.perfil import cargar
+
+        activar_catalogo(cargar(args.perfil).categorias)
     # La consola de Windows usa cp1252 por defecto y rompe los acentos de las tablas.
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")

@@ -1,0 +1,36 @@
+# Perfil del laboratorio Docker local (docker-compose.yml, perfil docker-lab). Replica el
+# modelo de AI Factory (perfiles/aifactory-dev.yaml): mismas series del exportador de
+# contenedores, sonda del blackbox y acciones por el ejecutor del host (AIOPS_ACTIONS=compose).
+# Diferencia: nivel 3, para medir al agente actuando como en el experimento de Kubernetes.
+version: 1
+aprobado: true
+aprobado_por: "laboratorio de la tesis (sin servicios reales)"
+entorno: dev
+observabilidad:
+  etiqueta_servicio: service
+  etiqueta_logs: service
+webhook:
+  servicio: labels.service_name|labels.service|labels.job
+consultas:
+  servicio_responde: 'min(probe_success{service="$servicio"})'
+  contenedor_sano: 'min(iafactory_infra_container_health_status{service_name="$servicio"})'
+investigacion:
+  contenedor_estado: 'iafactory_infra_container_state{service_name="$servicio"}'
+  contenedor_salud: 'iafactory_infra_container_health_status{service_name="$servicio"}'
+  responde: 'probe_success{service="$servicio"}'
+servicios: [lab-web, lab-api, lab-worker]
+categorias:
+  - id: servicio_caido
+    nombre: Servicio sin respuesta
+    alertas: [ServiceDown, AgentServiceDown, SyntheticProbeFailed]
+    runbook: RB-001
+    senal: {metrica: servicio_responde, operador: ">=", umbral: 1}
+    accion: restart_service
+    nivel: 3
+  - id: contenedor_fallido
+    nombre: Contenedor detenido o unhealthy
+    alertas: [ContainerUnhealthy, ContainerStopped]
+    runbook: RB-006
+    senal: {metrica: contenedor_sano, operador: ">=", umbral: 1}
+    accion: restart_service
+    nivel: 3

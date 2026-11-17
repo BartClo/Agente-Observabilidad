@@ -17,9 +17,10 @@ from __future__ import annotations
 import argparse
 import csv
 import time
+from contextlib import nullcontext
 from pathlib import Path
 
-from scripts.experimento import ESCENARIOS, RAIZ, _esperar, _k8s_sano, _prom, _sh
+from scripts.experimento import ESCENARIOS, RAIZ, _esperar, _k8s_sano, _prom, _sh, host_docker
 
 COLUMNAS = ["categoria", "mttr_s", "accion_incorrecta", "operador", "notas"]
 LIMITE_S = 1800  # una resolucion manual que pasa de 30 min no es L1: se anula la corrida
@@ -80,7 +81,9 @@ def medir(categoria: str, operador: str, salida: Path) -> int:
     print(f"\nResuelto en {mttr:.0f} s.")
     incorrecta = input("¿Ejecutaste alguna accion incorrecta o innecesaria? [s/N] ").strip().lower()
     notas = input("Notas (opcional): ").strip()
-    escribir_fila(salida, categoria, mttr, incorrecta.startswith("s"), operador, notas)
+    escribir_fila(
+        salida, esc.categoria or categoria, mttr, incorrecta.startswith("s"), operador, notas
+    )
     print(f"Registrado en {salida}")
     return 0
 
@@ -91,7 +94,11 @@ def main() -> int:
     p.add_argument("--operador", required=True)
     p.add_argument("--salida", default="resultados/linea_base.csv")
     args = p.parse_args()
-    return medir(args.categoria, args.operador, Path(args.salida))
+    # Docker: el exportador de estado de contenedores corre en el host, como en el experimento
+    # (el ejecutor tambien se levanta, pero el operador arregla a mano con docker restart).
+    docker = ESCENARIOS[args.categoria].plataforma == "docker"
+    with host_docker() if docker else nullcontext():
+        return medir(args.categoria, args.operador, Path(args.salida))
 
 
 if __name__ == "__main__":

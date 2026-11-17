@@ -8,11 +8,13 @@ from scripts.experimento import ESCENARIOS, RAIZ
 
 def test_cada_escenario_tiene_sus_scripts_y_su_categoria() -> None:
     for cat, esc in ESCENARIOS.items():
-        assert cat in CATALOGO
-        assert categoria_para_alerta(esc.alertname) is CATALOGO[cat]
         assert (RAIZ / "scripts" / "fallas" / esc.falla).exists(), esc.falla
         if esc.recuperar:
             assert (RAIZ / "scripts" / "fallas" / esc.recuperar).exists(), esc.recuperar
+        if esc.plataforma == "docker":
+            continue  # su catalogo es el del perfil: ver tests/test_docker_lab.py
+        assert cat in CATALOGO
+        assert categoria_para_alerta(esc.alertname) is CATALOGO[cat]
 
 
 def test_cola_detenida_es_remediable_en_el_laboratorio() -> None:

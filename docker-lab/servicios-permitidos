@@ -1,0 +1,4 @@
+# Contenedores del laboratorio Docker que el ejecutor del host puede reiniciar.
+lab-web
+lab-api
+lab-worker

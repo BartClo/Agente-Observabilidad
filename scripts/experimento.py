@@ -24,6 +24,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 import time
 import urllib.parse
 import urllib.request
@@ -47,6 +48,10 @@ class Escenario:
     anomalia: str  # PromQL que da >0 resultados mientras la falla esta presente
     recuperar: str | None = None  # script para volver a sano entre corridas
     usa_k8s: bool = False
+    # Categoria del catalogo activo, si no coincide con la clave del escenario (Docker: dos
+    # escenarios distintos caen en contenedor_fallido de perfiles/docker-lab.yaml).
+    categoria: str | None = None
+    plataforma: str = "k8s"  # "docker": perfil docker-lab y acciones por el ejecutor del host
 
 
 ESCENARIOS: dict[str, Escenario] = {
@@ -91,7 +96,38 @@ ESCENARIOS: dict[str, Escenario] = {
         "certificado_por_vencer.sh",
         '(min(probe_ssl_earliest_cert_expiry{service="gateway"}) - time()) / 86400 < 14',
     ),
+    # --- Laboratorio Docker (docker-compose.yml perfil docker-lab, perfiles/docker-lab.yaml).
+    # Mismas fallas que en AI Factory: contenedor muerto, healthcheck fallando y servicio que
+    # no responde con el contenedor vivo.
+    "contenedor_detenido": Escenario(
+        "ContainerStopped",
+        "lab-web",
+        "docker_contenedor_detenido.sh",
+        'max(iafactory_infra_container_health_status{service_name="lab-web"}) < 1',
+        "docker_recuperar_web.sh",
+        categoria="contenedor_fallido",
+        plataforma="docker",
+    ),
+    "contenedor_unhealthy": Escenario(
+        "ContainerUnhealthy",
+        "lab-api",
+        "docker_contenedor_unhealthy.sh",
+        'max(iafactory_infra_container_health_status{service_name="lab-api"}) < 1',
+        "docker_recuperar_api.sh",
+        categoria="contenedor_fallido",
+        plataforma="docker",
+    ),
+    "servicio_sin_respuesta": Escenario(
+        "ServiceDown",
+        "lab-worker",
+        "docker_servicio_caido.sh",
+        'max(probe_success{service="lab-worker"}) < 1',
+        "docker_recuperar_worker.sh",
+        categoria="servicio_caido",
+        plataforma="docker",
+    ),
 }
+DOCKER = [c for c, e in ESCENARIOS.items() if e.plataforma == "docker"]
 
 COLUMNAS = [
     "corrida",
@@ -223,8 +259,8 @@ CONFIG_RAG = {"AIOPS_RAG_K": "3", "AIOPS_RAG_MIN_SIM": "0.69"}
 RAG = "1"
 
 
-def _env_ciclo(nivel: int, puerto: str) -> list[str]:
-    env = {
+def _env_ciclo(nivel: int, puerto: str, plataforma: str = "k8s") -> list[str]:
+    env: dict[str, str] = {
         "AIOPS_BACKEND": "prometheus",
         "AIOPS_PROMETHEUS_URL": "http://prometheus:9090",
         # Logs (k8s-lab/promtail.yaml): explicito como Prometheus, para no depender de
@@ -250,6 +286,16 @@ def _env_ciclo(nivel: int, puerto: str) -> list[str]:
         **CONFIG_RAG,
         "AIOPS_RAG": RAG,
     }
+    if plataforma == "docker":
+        # Mismo agente, otra plataforma: el perfil cambia catalogo y consultas, y las acciones
+        # las ejecuta el host (docker-lab/, ver ejecutor_docker) sin docker.sock en el agente.
+        for k in ("AIOPS_K8S_API", "AIOPS_K8S_TOKEN_FILE", "AIOPS_K8S_CA_FILE"):
+            env.pop(k)
+        env.update(
+            AIOPS_ACTIONS="compose",
+            AIOPS_SOLICITUDES_DIR="/workspace/docker-lab/solicitudes",
+            AIOPS_PERFIL="perfiles/docker-lab.yaml",
+        )
     return [a for k, v in env.items() for a in ("-e", f"{k}={v}")]
 
 
@@ -355,6 +401,30 @@ def esperar_camino_real(
 
 
 @contextmanager
+def host_docker() -> Iterator[None]:
+    """Lo que en AI Factory corre en la VM: el exportador de estado de contenedores y el
+    ejecutor de acciones (deploy/aifactory/ejecutor), aca como procesos del host."""
+    lab = RAIZ / "docker-lab"
+    env = {
+        **os.environ,
+        "AIOPS_SOLICITUDES_DIR": str(lab / "solicitudes"),
+        "AIOPS_EJECUTOR_PERMITIDOS": str(lab / "servicios-permitidos"),
+    }
+    ejecutor = RAIZ / "deploy" / "aifactory" / "ejecutor" / "aiops_ejecutor.py"
+    log = (lab / "ejecutor.log").open("a", encoding="utf-8")
+    procesos = [
+        subprocess.Popen([sys.executable, str(lab / "exportador.py")], env=env),
+        subprocess.Popen([sys.executable, str(ejecutor)], env=env, stdout=log, stderr=log),
+    ]
+    try:
+        yield
+    finally:
+        for proc in procesos:
+            proc.terminate()
+        log.close()
+
+
+@contextmanager
 def worker_de_laboratorio(nivel: int, puerto: str) -> Iterator[None]:
     """Camino real: atiende el worker, no `scripts.lab_ciclo`. El worker del compose no trae
     el entorno del laboratorio (Prometheus, Kubernetes, nivel de autonomia), asi que se baja
@@ -403,7 +473,7 @@ def correr(
         agente=os.environ.get("AIOPS_AGENTE", "unico"),
         rag=RAG,
         via=via,
-        categoria_esperada=cat,
+        categoria_esperada=esc.categoria or cat,
         alertname=esc.alertname,
         servicio=esc.servicio,
     )
@@ -449,7 +519,7 @@ def correr(
                 "compose",
                 "exec",
                 "-T",
-                *_env_ciclo(nivel, puerto),
+                *_env_ciclo(nivel, puerto, esc.plataforma),
                 "api",
                 "uv",
                 "run",
@@ -593,7 +663,10 @@ def main() -> int:
         raise SystemExit("--via webhook solo con --modo llm: el modo script invoca el ciclo")
     if _prom("up") is None:
         raise SystemExit(f"Prometheus no responde en {PROMETHEUS}: levantar el laboratorio")
-    puerto = _puerto_k8s()
+    plataformas = {ESCENARIOS[c].plataforma for c in cats}
+    if "docker" in plataformas and args.via == "webhook":
+        raise SystemExit("Docker: solo --via directo (las reglas de Grafana son de k3d)")
+    puerto = _puerto_k8s() if "k8s" in plataformas else ""
 
     salida = Path(args.salida)
     salida.parent.mkdir(parents=True, exist_ok=True)
@@ -605,7 +678,7 @@ def main() -> int:
         contexto = (
             worker_de_laboratorio(args.nivel, puerto) if args.via == "webhook" else nullcontext()
         )
-        with contexto:
+        with contexto, host_docker() if "docker" in plataformas else nullcontext():
             for n in range(1, args.repeticiones + 1):
                 for cat in cats:  # intercalado: una categoria lenta no concentra sus corridas
                     print(
