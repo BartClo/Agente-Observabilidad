@@ -140,6 +140,25 @@ experimento (`AIOPS_BREAKER_MAX=0`), y el experimento inyecta fallas en el mismo
 cada 4 o 5 minutos. A partir de la tercera repetición, todo quedaba con confianza 0,5.
 Se corrigió en `62b0599`: el detector usa el mismo interruptor que el cortacircuito.
 
+## 8c. Plataforma Docker (lo que usa AI Factory, commit `7914b2d`)
+
+Mismo agente, mismo modelo y mismo diseño (nivel 3, 5 repeticiones, aislamiento entre corridas), pero sobre contenedores Docker locales (`ia-factory-lab-web/api/worker`) con el ejecutor del host (`docker restart` con lista de permitidos; el agente no toca `docker.sock`). Datos: `resultados/final-docker-n3.csv`.
+
+| Escenario (alerta) | Categoría | n | Resuelto sin humano | MTTR medio |
+|---|---|---|---|---|
+| contenedor_detenido (ContainerStopped) | contenedor_fallido | 5 | 5/5 | 30,4 s |
+| contenedor_unhealthy (ContainerUnhealthy) | contenedor_fallido | 5 | 5/5 | 34,0 s |
+| servicio_sin_respuesta (ServiceDown) | servicio_caido | 5 | 5/5 | 25,0 s |
+| **Total** | | 15 | **100 %** (IC 95 % Wilson 79,6–100 %) | **29,8 s** |
+
+Precisión de clasificación 100 %, acciones incorrectas 0 %, ~38,6k tokens y 6 turnos LLM por incidente, confianza mediana 0,9.
+
+Comparación con Kubernetes (sección 8b): en las categorías que la plataforma puede ejecutar ambas resuelven el 100 % con MTTR similar (28,2 s K8s, 29,8 s Docker). La diferencia de TRA global (75 % vs 100 %) viene de que el set K8s incluye `disco_lleno`, cuya acción no está implementada en ese backend.
+
+Corridas descartadas: `descartada-docker-limite-n3` (60 %): las rondas 4 y 5 las rechazó el límite de 3 reinicios/hora del ejecutor del host, que se apagó para el experimento (`AIOPS_EJECUTOR_MAX_POR_HORA=100`). La corrida final se cortó tras 13 de 15 por falta de memoria del equipo; las 2 restantes se completaron después con el mismo commit congelado.
+
+Línea base manual: aún no medida (H2 y H3 sin datos). El ejemplo de `resultados/DEMO-linea-base-simulada/` es ilustrativo y no es un resultado.
+
 ## 9. Limitaciones
 
 - Laboratorio en una sola máquina compartida: la carga externa afecta el MTTR.
