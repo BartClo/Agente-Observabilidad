@@ -24,3 +24,7 @@ def test_entorno_docker_usa_el_ejecutor_y_no_kubernetes() -> None:
     assert "AIOPS_K8S" not in env
     assert "AIOPS_BREAKER_MAX=0" in env  # mismo aislamiento que el experimento k8s
     assert "AIOPS_ACTIONS=k8s" in " ".join(ex._env_ciclo(3, "1"))
+
+
+def test_experimento_docker_apaga_el_limite_del_host() -> None:
+    assert int(ex.EJECUTOR_MAX_POR_HORA) >= 25  # 5 repeticiones no pueden chocar con el limite

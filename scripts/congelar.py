@@ -17,7 +17,7 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
-from scripts.experimento import AISLAMIENTO, CONFIG_RAG, RAG
+from scripts.experimento import AISLAMIENTO, CONFIG_RAG, EJECUTOR_MAX_POR_HORA, RAG
 
 RAIZ = Path(__file__).resolve().parent.parent
 API = os.environ.get("EXP_API", "http://localhost:8010")
@@ -78,7 +78,10 @@ def construir_registro() -> dict[str, object]:
         # consultar_eventos (estado y eventos del pod): "0" la quita, brazo sin investigacion
         "investigacion": _env("AIOPS_INVESTIGACION", "1"),
         # lo que el experimento fija en cada corrida (ver experimento.AISLAMIENTO)
-        "aislamiento_entre_corridas": dict(AISLAMIENTO),
+        "aislamiento_entre_corridas": {
+            **AISLAMIENTO,
+            "AIOPS_EJECUTOR_MAX_POR_HORA (docker)": EJECUTOR_MAX_POR_HORA,
+        },
         "prompt_sha256": _sha256(RAIZ / "agents" / "aiops" / "prompt.md"),
         "runbooks_sha256": _sha256(*(RAIZ / "agents" / "aiops" / "runbooks").glob("RB-*.md")),
         # Base de conocimiento: el corpus versionado (lo unico que entra en lo medido), el

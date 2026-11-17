@@ -255,6 +255,8 @@ AISLAMIENTO = {
 # RAG durante el experimento. min_sim sale de la calibracion (python -m rag.cli calibrar;
 # debe coincidir con agents.aiops.conocimiento.MIN_SIM_DEFECTO) y queda en congelado.json.
 # RAG="0" (--sin-rag) es el brazo de comparacion.
+EJECUTOR_MAX_POR_HORA = "100"  # laboratorio Docker: ver host_docker
+
 CONFIG_RAG = {"AIOPS_RAG_K": "3", "AIOPS_RAG_MIN_SIM": "0.69"}
 RAG = "1"
 
@@ -409,6 +411,10 @@ def host_docker() -> Iterator[None]:
         **os.environ,
         "AIOPS_SOLICITUDES_DIR": str(lab / "solicitudes"),
         "AIOPS_EJECUTOR_PERMITIDOS": str(lab / "servicios-permitidos"),
+        # Aislamiento, como AIOPS_BREAKER_MAX=0: el limite del host (3 reinicios por hora y
+        # servicio) frena la recurrencia real, pero el experimento reinicia el mismo
+        # contenedor 5 veces en ~15 min. Con el limite, las corridas 4 y 5 las rechaza el host.
+        "AIOPS_EJECUTOR_MAX_POR_HORA": EJECUTOR_MAX_POR_HORA,
     }
     ejecutor = RAIZ / "deploy" / "aifactory" / "ejecutor" / "aiops_ejecutor.py"
     log = (lab / "ejecutor.log").open("a", encoding="utf-8")
