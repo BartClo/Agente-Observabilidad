@@ -203,16 +203,25 @@ class Ciclo:
         escalado hace menos de `ventana_s`, esta se anota ahi y no abre otro: un solo
         diagnostico, un solo reinicio, un solo aviso. Un resuelto agrupa solo las alertas de
         la misma caida (disparadas antes del cierre); un descartado no agrupa.
-        La misma alerta (reintento del job) no agrupa."""
+        La misma alerta agrupa solo si es el mismo disparo (Alertmanager la repite mientras dura
+        la falla) y ya quedo escalada o resuelta; en curso no (reintento del job)."""
         if ventana_s <= 0:
             return None
         ahora = self._reloj()
         # ponytail: recorre todos los incidentes; filtrar por servicio en SQL si crecen mucho.
         for inc in reversed(self._repo.listar()):
-            if inc.alerta.servicio != alerta.servicio or inc.alerta.id == alerta.id:
+            if inc.alerta.servicio != alerta.servicio:
                 continue
-            en_curso = inc.estado not in self._ESTADOS_TERMINALES
-            escalado_reciente = inc.estado is Estado.ESCALADO and ahora - inc.abierto_en < ventana_s
+            misma_alerta = inc.alerta.id == alerta.id
+            if misma_alerta and (
+                alerta.disparada_en is None or inc.alerta.disparada_en != alerta.disparada_en
+            ):
+                continue
+            en_curso = not misma_alerta and inc.estado not in self._ESTADOS_TERMINALES
+            # Mismo disparo ya escalado: lo tiene una persona, sin limite de tiempo.
+            escalado_reciente = inc.estado is Estado.ESCALADO and (
+                misma_alerta or ahora - inc.abierto_en < ventana_s
+            )
             # Resuelto: agrupa solo si esta alerta empezo ANTES del cierre (es la misma caida,
             # que llego tarde). Si empezo despues, el servicio volvio a caer: incidente nuevo.
             misma_caida = (

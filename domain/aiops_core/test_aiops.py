@@ -1164,3 +1164,30 @@ def test_modo_evidencia_recurrencia_sigue_al_cortacircuito(breaker: int, confian
     ciclo._repo.listar = lambda: [*reales(), previa, previa]  # type: ignore[method-assign,list-item]
     inc_id = _diagnosticar(ciclo, a, evidencia_cumplida=True)
     assert ciclo.incidente(inc_id).confianza == confianza
+
+
+def test_el_mismo_disparo_repetido_no_abre_otro_incidente() -> None:
+    """Alertmanager repite la alerta mientras dura la falla: un escalado ya lo tiene una persona."""
+    import dataclasses
+
+    ciclo, _, a = armar()
+    inc = ciclo.abrir(a)
+    inc.alerta = dataclasses.replace(inc.alerta, disparada_en=500.0)
+    ciclo._guardar(inc)
+    repetida = inc.alerta
+    assert ciclo.agrupar(repetida, 900) is None  # en curso: es un reintento del job, se atiende
+    ciclo.escalar(inc.id, "x")
+    ciclo._reloj = lambda: inc.abierto_en + 5000  # tambien pasada la ventana
+    assert (g := ciclo.agrupar(repetida, 900)) is not None and g.id == inc.id
+    # Otro disparo de la misma alerta, o sin hora de disparo: falla nueva.
+    assert ciclo.agrupar(dataclasses.replace(repetida, disparada_en=600.0), 900) is None
+    assert ciclo.agrupar(dataclasses.replace(repetida, disparada_en=None), 900) is None
+    assert ciclo.agrupar(repetida, 0) is None
+    inc = ciclo.incidente(inc.id)
+    inc.estado, inc.cerrado_en = Estado.RESUELTO, 1000.0
+    ciclo._guardar(inc)
+    ciclo._reloj = lambda: 1030.0
+    assert ciclo.agrupar(repetida, 900) is not None  # repeticion que llego tras el cierre
+    inc.estado = Estado.DESCARTADO
+    ciclo._guardar(inc)
+    assert ciclo.agrupar(repetida, 900) is None
