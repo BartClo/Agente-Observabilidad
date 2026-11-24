@@ -166,7 +166,12 @@ def encolar_reanudacion(incidente_id: str) -> None:
 def encolar_alerta(alerta: Alerta, es_firing: bool) -> bool:
     """Encola la alerta para `procesar_alerta_webhook`. La usan el webhook de Grafana y el
     poller de Jira: mismo dedupe (job_id = alerta.id), timeout, reintentos y cola de fallidos.
-    False si ya habia un job en curso para esa alerta."""
+    False si ya habia un job en curso para esa alerta o si AIOPS_INTAKE_SERVICES (lista
+    cerrada opcional; vacia = todos) no incluye el servicio."""
+    entrada = {s.strip() for s in os.environ.get("AIOPS_INTAKE_SERVICES", "").split(",")} - {""}
+    if entrada and alerta.servicio not in entrada:
+        logger.info("alerta de %s fuera de AIOPS_INTAKE_SERVICES: no se atiende", alerta.servicio)
+        return False
     import dataclasses
     import re
 
