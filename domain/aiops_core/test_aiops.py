@@ -661,6 +661,26 @@ def test_verificar_con_espera_sondea_hasta_recuperar() -> None:
     assert ciclo.cerrar(inc_id).resuelto_autonomo
 
 
+def test_accion_rechazada_y_servicio_que_vuelve_solo_no_es_autonomo(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    env = _ObsLenta(lecturas_hasta_sano=1)
+    alerta = env.inyectar_fallo("checkout", "servicio_detenido")
+    ciclo, _ = _ciclo_con_espera(env, ventana=120)
+    inc_id = preparar(ciclo, alerta.id)
+
+    def rechaza(*_: object) -> str:
+        raise RuntimeError("rechazado por el ejecutor")
+
+    with monkeypatch.context() as m:
+        m.setattr(env, "ejecutar", rechaza)
+        assert not ciclo.ejecutar_remediacion(inc_id, aprobada=False).ejecutada
+    env.ejecutar("restart_service", "checkout", 30)  # vuelve por otra via
+    assert ciclo.verificar(inc_id)[0]
+    inc = ciclo.cerrar(inc_id)
+    assert inc.estado is Estado.RESUELTO and not inc.resuelto_autonomo
+
+
 def test_verificar_con_espera_se_rinde_al_agotar_la_ventana() -> None:
     env = _ObsLenta(lecturas_hasta_sano=100)
     alerta = env.inyectar_fallo("checkout", "servicio_detenido")

@@ -110,5 +110,12 @@ class Incidente:
 
     @property
     def resuelto_autonomo(self) -> bool:
-        """Resuelto y verificado sin intervencion humana (numerador de la TRA)."""
-        return self.estado is Estado.RESUELTO and self.verificado and not self.intervencion_humana
+        """Resuelto y verificado sin intervencion humana (numerador de la TRA). Exige una
+        remediacion ejecutada con exito: si el ejecutor la rechazo o fallo y el servicio
+        volvio igual, no lo resolvio el agente."""
+        return (
+            self.estado is Estado.RESUELTO
+            and self.verificado
+            and not self.intervencion_humana
+            and any(x.ok and not x.es_rollback for x in self.acciones)
+        )
